@@ -190,7 +190,7 @@
 #define configTOTAL_HEAP_SIZE			(&_heap_end - &_heap_start)//( ( size_t ) (64 * 1024) )
 
 #define configMAX_TASK_NAME_LEN			( CONFIG_FREERTOS_MAX_TASK_NAME_LEN )
-#define configUSE_TRACE_FACILITY		0		/* Used by vTaskList in main.c */
+//#define configUSE_TRACE_FACILITY		0		/* Used by vTaskList in main.c */
 #define configUSE_STATS_FORMATTING_FUNCTIONS	0	/* Used by vTaskList in main.c */
 #define configUSE_TRACE_FACILITY_2      0		/* Provided by Xtensa port patch */
 #define configBENCHMARK					0		/* Provided by Xtensa port patch */
@@ -229,6 +229,16 @@
 #define INCLUDE_vTaskDelay					1
 #define INCLUDE_uxTaskGetStackHighWaterMark	1
 #define INCLUDE_pcTaskGetTaskName			1
+
+#ifdef CONFIG_OVMS_DEV_DEBUGRAM
+#define CONFIG_ENABLE_MEMORY_DEBUG 1
+#endif
+
+#ifdef CONFIG_OVMS_DEV_DEBUGTASKS
+#define configUSE_TRACE_FACILITY 1
+#else
+#define configUSE_TRACE_FACILITY 0 /* Used by vTaskList in main.c */
+#endif
 
 #if CONFIG_ENABLE_MEMORY_DEBUG
 #define configENABLE_MEMORY_DEBUG 1
