@@ -232,6 +232,8 @@
 
 #if CONFIG_ENABLE_MEMORY_DEBUG
 #define configENABLE_MEMORY_DEBUG 1
+#define configENABLE_MEMORY_DEBUG_DUMP 1
+#define configENABLE_MEMORY_DEBUG_ABORT 1
 #else
 #define configENABLE_MEMORY_DEBUG 0
 #endif

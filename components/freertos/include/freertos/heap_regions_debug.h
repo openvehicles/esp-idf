@@ -5,6 +5,10 @@
 
 #if (configENABLE_MEMORY_DEBUG == 1)
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #define DEBUG_DOG_VALUE 0x1a2b3c4d
 #define DEBUG_MAX_INFO_NUM 20
 #define DEBUG_TYPE_MALLOC 1
@@ -65,6 +69,24 @@ extern void mem_debug_init(size_t size, void *start, void *end, portMUX_TYPE *mu
 extern void mem_malloc_block(void *data);
 extern void mem_free_block(void *data);
 extern void mem_check_all(void* pv);
+extern void mem_debug_malloc_show(void);
+#if (configENABLE_MEMORY_DEBUG_ABORT == 1)
+extern void mem_malloc_set_abort(int task, int size, int count);
+#endif
+
+#if (configENABLE_MEMORY_DEBUG_DUMP == 1)
+typedef struct {
+    char task[4];
+    void* address;
+    int size;
+} mem_dump_block_t;
+
+extern size_t mem_debug_malloc_dump(int task, mem_dump_block_t* buffer, size_t size);
+#endif
+
+#ifdef __cplusplus
+}
+#endif
 
 #else
 

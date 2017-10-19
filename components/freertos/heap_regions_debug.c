@@ -62,6 +62,39 @@ void mem_debug_malloc_show(void)
     taskEXIT_CRITICAL(g_malloc_mutex);
 }
 
+#if (configENABLE_MEMORY_DEBUG_DUMP == 1)
+size_t mem_debug_malloc_dump(int task, mem_dump_block_t* buffer, size_t size)
+{
+    os_block_t *b = g_malloc_list.next;
+    debug_block_t *d;
+    int btask;
+    size_t remaining = size;
+
+    taskENTER_CRITICAL(g_malloc_mutex);
+    while (b && remaining > 0) {
+        d = DEBUG_BLOCK(b);
+	btask = *(int*)d->head.task;
+	if (task) {
+	    if (btask != task) {
+		b = b->next;
+		continue;
+	    }
+	} else if (!btask) {
+	    b = b->next;
+	    continue;
+	}
+	*(int*)buffer->task = btask;
+	buffer->address = (void*)b;
+	buffer->size = b->size;
+	++buffer;
+	--remaining;
+        b = b->next;
+    }
+    taskEXIT_CRITICAL(g_malloc_mutex);
+    return size - remaining;
+}
+#endif
+
 void mem_debug_show(void)
 {
     uint32_t i;
@@ -102,6 +135,9 @@ void mem_init_dog(void *data)
         strncpy(b->head.task, pcTaskGetTaskName(task), 3);
         b->head.task[3] = '\0';
     } 
+    else {
+	*(int*)b->head.task = 0;
+    }
 #else
     b->head.task = '\0';
 #endif
@@ -143,6 +179,21 @@ void mem_malloc_show(void)
     }
 }
 
+#if (configENABLE_MEMORY_DEBUG_ABORT == 1)
+static int abort_enable = 0;
+static int abort_task = 0;
+static int abort_size = 0;
+static int abort_count = 0;
+
+void mem_malloc_set_abort(int task, int size, int count)
+{
+    abort_enable = 1;
+    abort_task = task;
+    abort_size = size;
+    abort_count = count;
+}
+#endif
+
 void mem_malloc_block(void *data)
 {
     os_block_t *b = (os_block_t*)data;
@@ -153,6 +204,15 @@ void mem_malloc_block(void *data)
     if (b){
         b->next = g_malloc_list.next;
         g_malloc_list.next = b;
+#if (configENABLE_MEMORY_DEBUG_ABORT == 1)
+	debug_block_t *d = DEBUG_BLOCK(b);
+	if (abort_enable && *(int*)d->head.task == abort_task &&
+	    (abort_size == 0 || abort_size == b->size)) {
+	    if (--abort_count <= 0)
+		abort();
+	    ets_printf("%s %p %p %u\n", d->head.task, d, b, b->size);
+	}
+#endif
     }
 }
 
