@@ -87,6 +87,7 @@ task.h is included from an application file. */
 #include "StackMacros.h"
 #include "portmacro.h"
 #include "semphr.h"
+#include "heap_regions_debug.h"
 
 /* Lint e961 and e750 are suppressed as a MISRA exception justified because the
 MPU ports require MPU_WRAPPERS_INCLUDED_FROM_API_FILE to be defined for the
@@ -3660,6 +3661,10 @@ BaseType_t xTaskGetAffinity( TaskHandle_t xTask )
 				pxTaskStatusArray[ uxTask ].xTaskNumber = pxNextTCB->uxTCBNumber;
 				pxTaskStatusArray[ uxTask ].eCurrentState = eState;
 				pxTaskStatusArray[ uxTask ].uxCurrentPriority = pxNextTCB->uxPriority;
+				os_block_t* stackblk = (os_block_t*)(pxNextTCB->pxStack - sizeof(os_block_t));
+				uint32_t stackinfo = (stackblk->size - sizeof(debug_block_t) - sizeof(block_tail_t)) << 16;
+				stackinfo |= pxNextTCB->pxTopOfStack - pxNextTCB->pxStack;
+				pxTaskStatusArray[ uxTask ].pxStackBase = (StackType_t*)stackinfo;
 
 				#if ( INCLUDE_vTaskSuspend == 1 )
 				{
