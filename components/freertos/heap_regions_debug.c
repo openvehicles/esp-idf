@@ -86,6 +86,7 @@ size_t mem_debug_malloc_dump(int task, mem_dump_block_t* buffer, size_t size)
 	*(int*)buffer->task = btask;
 	buffer->address = (void*)b;
 	buffer->size = b->size;
+	buffer->xtag = b->xtag;
 	++buffer;
 	--remaining;
         b = b->next;
@@ -132,8 +133,9 @@ void mem_init_dog(void *data)
 #if (INCLUDE_pcTaskGetTaskName == 1)
     task = xTaskGetCurrentTaskHandle();
     if (task){
-        strncpy(b->head.task, pcTaskGetTaskName(task), 3);
-        b->head.task[3] = '\0';
+        int name = 0;
+        strncpy((char*)&name, pcTaskGetTaskName(task), 3);
+        *(int*)b->head.task = name;
     } 
     else {
 	*(int*)b->head.task = 0;

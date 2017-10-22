@@ -78,7 +78,9 @@ extern void mem_malloc_set_abort(int task, int size, int count);
 typedef struct {
     char task[4];
     void* address;
-    int size;
+    int size: 24;                           /*<< The size of the free block. */
+    int xtag: 7;                            /*<< Tag of this region */
+    int xAllocated: 1;                      /*<< 1 if allocated */
 } mem_dump_block_t;
 
 extern size_t mem_debug_malloc_dump(int task, mem_dump_block_t* buffer, size_t size);
