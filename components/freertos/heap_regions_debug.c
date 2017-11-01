@@ -1,6 +1,6 @@
-#include "heap_regions_debug.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "heap_regions_debug.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -33,9 +33,9 @@ void mem_debug_push(char type, void *addr)
     MEM_DEBUG("push type=%d addr=%p\n", type, addr);
     if (g_mem_print){
         if (type == DEBUG_TYPE_MALLOC){
-            ets_printf("task=%s t=%s s=%u a=%p\n", debug_b->head.task?debug_b->head.task:"", type==DEBUG_TYPE_MALLOC?"m":"f", b->size, addr);
+            ets_printf("task=%08X t=%s s=%u a=%p\n", debug_b->head.task, type==DEBUG_TYPE_MALLOC?"m":"f", b->size, addr);
         } else {
-            ets_printf("task=%s t=%s s=%u a=%p\n", debug_b->head.task?debug_b->head.task:"", type==DEBUG_TYPE_MALLOC?"m":"f", b->size, addr);
+            ets_printf("task=%08X t=%s s=%u a=%p\n", debug_b->head.task, type==DEBUG_TYPE_MALLOC?"m":"f", b->size, addr);
         }
     } else {
         mem_dbg_info_t *info = &g_mem_dbg.info[g_mem_dbg.cnt%DEBUG_MAX_INFO_NUM];
@@ -55,25 +55,24 @@ void mem_debug_malloc_show(void)
     taskENTER_CRITICAL(g_malloc_mutex);
     while (b){
         d = DEBUG_BLOCK(b);
-        d->head.task[3] = '\0';
-        ets_printf("t=%s s=%u a=%p\n", d->head.task?d->head.task:"", b->size, b);
+        ets_printf("t=%08X s=%u a=%p\n", d->head.task, b->size, b);
         b = b->next;
     }
     taskEXIT_CRITICAL(g_malloc_mutex);
 }
 
-#if (configENABLE_MEMORY_DEBUG_DUMP == 1)
-size_t mem_debug_malloc_dump(int task, mem_dump_block_t* buffer, size_t size)
+#if (configENABLE_MEMORY_DEBUG_DUMP >= 1)
+size_t mem_debug_malloc_dump(TaskHandle_t task, mem_dump_block_t* buffer, size_t size)
 {
     os_block_t *b = g_malloc_list.next;
     debug_block_t *d;
-    int btask;
+    TaskHandle_t btask;
     size_t remaining = size;
 
     taskENTER_CRITICAL(g_malloc_mutex);
     while (b && remaining > 0) {
         d = DEBUG_BLOCK(b);
-	btask = *(int*)d->head.task;
+	btask = d->head.task;
 	if (task) {
 	    if (btask != task) {
 		b = b->next;
@@ -83,7 +82,7 @@ size_t mem_debug_malloc_dump(int task, mem_dump_block_t* buffer, size_t size)
 	    b = b->next;
 	    continue;
 	}
-	*(int*)buffer->task = btask;
+	buffer->task = btask;
 	buffer->address = (void*)b;
 	buffer->size = b->size;
 	buffer->xtag = b->xtag;
@@ -92,6 +91,67 @@ size_t mem_debug_malloc_dump(int task, mem_dump_block_t* buffer, size_t size)
         b = b->next;
     }
     taskEXIT_CRITICAL(g_malloc_mutex);
+    return size - remaining;
+}
+
+size_t mem_debug_malloc_dump_totals(mem_dump_totals_t* totals, size_t* ntotal, size_t max,
+				    TaskHandle_t* tasks, size_t ntasks,
+				    mem_dump_block_t* buffer, size_t size)
+{
+    os_block_t *b = g_malloc_list.next;
+    debug_block_t *d;
+    TaskHandle_t btask;
+    size_t count = *ntotal;
+    size_t remaining = size;
+    size_t i;
+
+    taskENTER_CRITICAL(g_malloc_mutex);
+    while (b && remaining > 0) {
+        d = DEBUG_BLOCK(b);
+	btask = d->head.task;
+	int tag = b->xtag;
+	if (tag >= NUM_USED_TAGS) {
+	    b = b->next;
+	    continue;
+	}
+	size_t index;
+	for (index = 0; index < count; ++index) {
+	    if (totals[index].task == btask)
+		break;
+	}
+	if (index < count)
+	    totals[index].after[tag] += b->size;
+	else {
+	    if (count < max) {
+		totals[count].task = btask;
+		for (i = 0; i < NUM_USED_TAGS; ++i) {
+		    totals[count].before[i] = 0;
+		    totals[count].after[i] = 0;
+		}
+		totals[count].after[tag] = b->size;
+		++count;
+	    }
+	}
+	if (tasks) {
+	    for (i = 0; i < ntasks; ++i) {
+		if (btask == tasks[i])
+		    break;
+	    }
+	    if (i == ntasks) {
+		b = b->next;
+		continue;
+	    }
+	}
+	buffer->task = btask;
+	buffer->address = (void*)b;
+	buffer->size = b->size;
+	buffer->xtag = b->xtag;
+	++buffer;
+	--remaining;
+        b = b->next;
+    }
+    taskEXIT_CRITICAL(g_malloc_mutex);
+    *ntotal = count;
     return size - remaining;
 }
 #endif
@@ -114,11 +174,11 @@ void mem_check_block(void* data)
     MEM_DEBUG("check block data=%p\n", data);
     if (data && (HEAD_DOG(b) == DEBUG_DOG_VALUE)){
         if (TAIL_DOG(b) != DEBUG_DOG_VALUE){
-            ets_printf("f task=%s a=%p h=%08x t=%08x\n", b->head.task?b->head.task:"", b, HEAD_DOG(b), TAIL_DOG(b));
+            ets_printf("f task=%08X a=%p h=%08x t=%08x\n", b->head.task, b, HEAD_DOG(b), TAIL_DOG(b));
             DOG_ASSERT();
         }
     } else {
-        ets_printf("f task=%s a=%p h=%08x\n", b->head.task?b->head.task:"", b, HEAD_DOG(b));\
+        ets_printf("f task=%08X a=%p h=%08x\n", b->head.task, b, HEAD_DOG(b));\
         DOG_ASSERT();
     }
 }
@@ -126,22 +186,13 @@ void mem_check_block(void* data)
 void mem_init_dog(void *data)
 {
     debug_block_t *b = DEBUG_BLOCK(data);
-    xTaskHandle task;
 
     MEM_DEBUG("init dog, data=%p debug_block=%p block_size=%x\n", data, b, b->os_block.size);
     if (!data) return;
 #if (INCLUDE_pcTaskGetTaskName == 1)
-    task = xTaskGetCurrentTaskHandle();
-    if (task){
-        int name = 0;
-        strncpy((char*)&name, pcTaskGetTaskName(task), 3);
-        *(int*)b->head.task = name;
-    } 
-    else {
-	*(int*)b->head.task = 0;
-    }
+    b->head.task = xTaskGetCurrentTaskHandle();
 #else
-    b->head.task = '\0';
+    b->head.task = 0;
 #endif
     HEAD_DOG(b) = DEBUG_DOG_VALUE;
     TAIL_DOG(b) = DEBUG_DOG_VALUE;
@@ -176,18 +227,18 @@ void mem_malloc_show(void)
 
     while (b){
         debug_b = DEBUG_BLOCK(b);
-        ets_printf("%s %p %p %u\n", debug_b->head.task, debug_b, b, b->size);
+        ets_printf("%08X %p %p %u\n", debug_b->head.task, debug_b, b, b->size);
         b = b->next;
     }
 }
 
 #if (configENABLE_MEMORY_DEBUG_ABORT == 1)
 static int abort_enable = 0;
-static int abort_task = 0;
+static TaskHandle_t abort_task = 0;
 static int abort_size = 0;
 static int abort_count = 0;
 
-void mem_malloc_set_abort(int task, int size, int count)
+void mem_malloc_set_abort(TaskHandle_t task, int size, int count)
 {
     abort_enable = 1;
     abort_task = task;
@@ -208,11 +259,11 @@ void mem_malloc_block(void *data)
         g_malloc_list.next = b;
 #if (configENABLE_MEMORY_DEBUG_ABORT == 1)
 	debug_block_t *d = DEBUG_BLOCK(b);
-	if (abort_enable && *(int*)d->head.task == abort_task &&
+	if (abort_enable && (!abort_task || d->head.task == abort_task) &&
 	    (abort_size == 0 || abort_size == b->size)) {
+	    ets_printf("  malloc %08X %p %p %u\n", d->head.task, d, b, b->size);
 	    if (--abort_count <= 0)
 		abort();
-	    ets_printf("%s %p %p %u\n", d->head.task, d, b, b->size);
 	}
 #endif
     }
@@ -243,7 +294,7 @@ void mem_free_block(void *data)
     }
 
     debug_b = DEBUG_BLOCK(del);
-    ets_printf("%s %p %p %u already free\n", debug_b->head.task, debug_b, del, del->size);
+    ets_printf("%08X %p %p %u already free\n", debug_b->head.task, debug_b, del, del->size);
     mem_malloc_show();
     abort();
 }

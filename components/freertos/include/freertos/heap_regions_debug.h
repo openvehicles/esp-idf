@@ -16,7 +16,7 @@ extern "C" {
 
 typedef struct {
     unsigned int dog;
-    char task[4];
+    TaskHandle_t task;
     unsigned int pc;
 }block_head_t;
 
@@ -39,7 +39,7 @@ typedef struct {
 
 typedef struct _mem_dbg_info{
     void     *addr;
-    char     *task;
+    TaskHandle_t task;
     uint32_t pc;
     uint32_t time;
     uint8_t  type;
@@ -71,19 +71,29 @@ extern void mem_free_block(void *data);
 extern void mem_check_all(void* pv);
 extern void mem_debug_malloc_show(void);
 #if (configENABLE_MEMORY_DEBUG_ABORT == 1)
-extern void mem_malloc_set_abort(int task, int size, int count);
+extern void mem_malloc_set_abort(TaskHandle_t task, int size, int count);
 #endif
 
-#if (configENABLE_MEMORY_DEBUG_DUMP == 1)
+#if (configENABLE_MEMORY_DEBUG_DUMP >= 1)
 typedef struct {
-    char task[4];
+    TaskHandle_t task;
     void* address;
     int size: 24;                           /*<< The size of the free block. */
     int xtag: 7;                            /*<< Tag of this region */
     int xAllocated: 1;                      /*<< 1 if allocated */
 } mem_dump_block_t;
 
-extern size_t mem_debug_malloc_dump(int task, mem_dump_block_t* buffer, size_t size);
+#define NUM_USED_TAGS 3
+typedef struct {
+    TaskHandle_t task;
+    int before[NUM_USED_TAGS];
+    int after[NUM_USED_TAGS];
+} mem_dump_totals_t;
+
+extern size_t mem_debug_malloc_dump(TaskHandle_t task, mem_dump_block_t* buffer, size_t size);
+extern size_t mem_debug_malloc_dump_totals(mem_dump_totals_t* totals, size_t* ntotal, size_t max,
+					   TaskHandle_t* tasks, size_t ntasks,
+					   mem_dump_block_t* buffer, size_t size);
 #endif
 
 #ifdef __cplusplus
