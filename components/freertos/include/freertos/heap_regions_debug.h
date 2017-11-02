@@ -17,7 +17,7 @@ extern "C" {
 typedef struct {
     unsigned int dog;
     TaskHandle_t task;
-    unsigned int pc;
+    //unsigned int pc;
 }block_head_t;
 
 typedef struct {
