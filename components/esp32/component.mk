@@ -2,9 +2,9 @@
 # Component Makefile
 #
 
-#ifdef IS_BOOTLOADER_BUILD
+ifdef IS_BOOTLOADER_BUILD
 CFLAGS += -DBOOTLOADER_BUILD
-#endif
+endif
 
 COMPONENT_SRCDIRS := . hwcrypto
 LIBS := core rtc
