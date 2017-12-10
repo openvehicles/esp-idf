@@ -96,6 +96,7 @@ static uint32_t s_log_cache_misses = 0;
 
 static inline bool get_cached_log_level(const char* tag, esp_log_level_t* level);
 static inline bool get_uncached_log_level(const char* tag, esp_log_level_t* level);
+static inline bool update_cached_log_level(const char* tag, esp_log_level_t level);
 static inline void add_to_cache(const char* tag, esp_log_level_t level);
 static void heap_bubble_down(int index);
 static inline void heap_swap(int i, int j);
@@ -121,8 +122,20 @@ void esp_log_level_set(const char* tag, esp_log_level_t level)
         xSemaphoreGive(s_log_mutex);
         return;
     }
+    // otherwise update the cached entry if it exists
+    update_cached_log_level(tag, level);
 
-    // allocate new linked list entry and append it to the endo of the list
+    // Walk the linked list of all tags and see if given tag is present in the list.
+    // If so, update it.  This is slow because tags are compared as strings.
+    for (uncached_tag_entry_t* it = s_log_tags_head; it != NULL; it = it->next) {
+        if (strcmp(tag, it->tag) == 0) {
+            it->level = level;
+	    xSemaphoreGive(s_log_mutex);
+	    return;
+        }
+    }
+
+    // allocate new linked list entry and append it to the end of the list
     size_t entry_size = offsetof(uncached_tag_entry_t, tag) + strlen(tag) + 1;
     uncached_tag_entry_t* new_entry = (uncached_tag_entry_t*) malloc(entry_size);
     if (!new_entry) {
@@ -208,6 +221,37 @@ static inline bool get_cached_log_level(const char* tag, esp_log_level_t* level)
     }
     // Return level from cache
     *level = (esp_log_level_t) s_log_cache[i].level;
+    // If cache has been filled, start taking ordering into account
+    // (other options are: dynamically resize cache, add "dummy" entries
+    //  to the cache; this option was chosen because code is much simpler,
+    //  and the unfair behavior of cache will show it self at most once, when
+    //  it has just been filled)
+    if (s_log_cache_entry_count == TAG_CACHE_SIZE) {
+        // Update item generation
+        s_log_cache[i].generation = s_log_cache_max_generation++;
+        // Restore heap ordering
+        heap_bubble_down(i);
+    }
+    return true;
+}
+
+static inline bool update_cached_log_level(const char* tag, esp_log_level_t level)
+{
+    // Look for `tag` in cache
+    int i;
+    for (i = 0; i < s_log_cache_entry_count; ++i) {
+#ifdef LOG_BUILTIN_CHECKS
+        assert(i == 0 || s_log_cache[(i - 1) / 2].generation < s_log_cache[i].generation);
+#endif
+        if (strcmp(s_log_cache[i].tag, tag) == 0) {
+            break;
+        }
+    }
+    if (i == s_log_cache_entry_count) { // Not found in cache
+        return false;
+    }
+    // Set new level from cache
+    s_log_cache[i].level = level;
     // If cache has been filled, start taking ordering into account
     // (other options are: dynamically resize cache, add "dummy" entries
     //  to the cache; this option was chosen because code is much simpler,
