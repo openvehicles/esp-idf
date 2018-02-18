@@ -1,14 +1,17 @@
 # Component support for esptool.py. Doesn't do much by itself,
 # components have their own flash targets that can use these variables.
-ESPPORT ?= $(CONFIG_ESPTOOLPY_PORT)
+
+PYTHON ?= $(call dequote,$(CONFIG_PYTHON))
+
+ifdef CONFIG_ESPTOOLPY_PORT
+ESPPORT ?= $(shell $(PYTHON) $(IDF_PATH)/tools/findcp2102.py $(CONFIG_ESPTOOLPY_PORT))
+endif
 ESPBAUD ?= $(CONFIG_ESPTOOLPY_BAUD)
 ESPFLASHMODE ?= $(CONFIG_ESPTOOLPY_FLASHMODE)
 ESPFLASHFREQ ?= $(CONFIG_ESPTOOLPY_FLASHFREQ)
 ESPFLASHSIZE ?= $(CONFIG_ESPTOOLPY_FLASHSIZE)
 
 CONFIG_ESPTOOLPY_COMPRESSED ?=
-
-PYTHON ?= $(call dequote,$(CONFIG_PYTHON))
 
 # two commands that can be used from other components
 # to invoke esptool.py (with or without serial port args)
