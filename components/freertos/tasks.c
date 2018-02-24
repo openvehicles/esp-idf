@@ -3759,7 +3759,7 @@ BaseType_t xTaskGetAffinity( TaskHandle_t xTask )
 				} poison_head_t;
 				poison_head_t* stackblk = (poison_head_t*)(pxNextTCB->pxStack - sizeof(poison_head_t));
 				uint32_t stackinfo = stackblk->alloc_size << 16;
-				stackinfo |= pxNextTCB->pxTopOfStack - pxNextTCB->pxStack;
+				stackinfo |= (pxNextTCB->pxTopOfStack - pxNextTCB->pxStack);
 				pxTaskStatusArray[ uxTask ].pxStackBase = (StackType_t*)stackinfo;
 #endif
 
