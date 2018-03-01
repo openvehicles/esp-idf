@@ -198,10 +198,6 @@ static ip_addr_t sntp_last_server_address;
 static u32_t sntp_last_timestamp_sent[2];
 #endif /* SNTP_CHECK_RESPONSE >= 2 */
 
-/* Weak callback to notify that system time has been set */
-#pragma weak sntp_setsystemtime
-extern void sntp_setsystemtime(u32_t, u32_t);
-
 /**
  * SNTP processing of received timestamp
  */
@@ -222,8 +218,6 @@ sntp_process(u32_t *receive_timestamp)
   /* display local time from GMT time */
   LWIP_DEBUGF(SNTP_DEBUG_TRACE, ("sntp_process: %s, %"U32_F" us", ctime(&tim), us));
 
-  /* Weak callback notification that system time has been set */
-  if (sntp_setsystemtime != NULL) sntp_setsystemtime(t, us);
 #else /* SNTP_CALC_TIME_US */
 
   /* change system time and/or the update the RTC clock */
@@ -231,9 +225,6 @@ sntp_process(u32_t *receive_timestamp)
   /* display local time from GMT time */
 
   LWIP_DEBUGF(SNTP_DEBUG_TRACE, ("sntp_process: %s", ctime(&tim)));
-
-  /* Weak callback notification that system time has been set */
-  if (sntp_setsystemtime != NULL) sntp_setsystemtime(t, 0);
 #endif /* SNTP_CALC_TIME_US */
   LWIP_UNUSED_ARG(tim);
 }
