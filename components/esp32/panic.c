@@ -518,6 +518,19 @@ static void commonErrorHandler_dump(XtExcFrame *frame, int core_id)
 
 }
 
+#if CONFIG_ESP32_PANIC_CALLBACK
+/*
+ * Custom error handler callback registration.
+ */
+xt_error_handler_callback customErrorHandler = NULL;
+xt_error_handler_callback xt_set_error_handler_callback(xt_error_handler_callback f)
+{
+  xt_error_handler_callback old = customErrorHandler;
+  customErrorHandler = f;
+  return old;
+}
+#endif //CONFIG_ESP32_PANIC_CALLBACK
+
 /*
   We arrive here after a panic or unhandled exception, when no OCD is detected. Dump the registers to the
   serial port and either jump to the gdb stub, halt the CPU or reboot.
@@ -538,6 +551,14 @@ static __attribute__((noreturn)) void commonErrorHandler(XtExcFrame *frame)
         commonErrorHandler_dump((XtExcFrame *)other_core_frame, (core_id ? 0 : 1));
     }
 #endif //!CONFIG_FREERTOS_UNICORE
+
+#if CONFIG_ESP32_PANIC_CALLBACK
+  if (customErrorHandler) {
+    disableAllWdts();
+    customErrorHandler(frame, core_id, abort_called);
+    reconfigureAllWdts();
+  }
+#endif
 
 #if CONFIG_ESP32_APPTRACE_ENABLE
     disableAllWdts();

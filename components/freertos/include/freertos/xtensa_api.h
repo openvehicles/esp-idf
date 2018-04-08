@@ -39,6 +39,9 @@ typedef void (*xt_handler)(void *);
 /* Typedef for C-callable exception handler function */
 typedef void (*xt_exc_handler)(XtExcFrame *);
 
+/* Typedef for C-callable standard error handler callback */
+typedef void (*xt_error_handler_callback)(XtExcFrame *, int core_id, bool is_abort);
+
 
 /*
 -------------------------------------------------------------------------------
@@ -62,9 +65,26 @@ extern xt_exc_handler xt_set_exception_handler(int n, xt_exc_handler f);
 
 /*
 -------------------------------------------------------------------------------
+  Call this function to set a callback for the standard error handler.
+  The callback will be called by the commonErrorHandler on all errors.
+
+    f        - Callback function address, NULL to uninstall callback.
+
+  The callback will be passed a pointer to the exception frame, which is created
+  on the stack of the thread that caused the exception, the core id and
+  a bool to signal if abort() has been called.
+
+  The callback is called with watchdogs disabled.
+-------------------------------------------------------------------------------
+*/
+extern xt_error_handler_callback xt_set_error_handler_callback(xt_error_handler_callback f);
+
+
+/*
+-------------------------------------------------------------------------------
   Call this function to set a handler for the specified interrupt. The handler
   will be installed on the core that calls this function.
- 
+
     n        - Interrupt number.
     f        - Handler function address, NULL to uninstall handler.
     arg      - Argument to be passed to handler.
@@ -120,7 +140,7 @@ static inline void xt_set_intclear(unsigned int arg)
 /*
 -------------------------------------------------------------------------------
   Call this function to get handler's argument for the specified interrupt.
- 
+
     n        - Interrupt number.
 -------------------------------------------------------------------------------
 */
