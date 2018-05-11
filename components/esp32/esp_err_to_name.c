@@ -13,6 +13,9 @@
 #if __has_include("esp_image_format.h")
 #include "esp_image_format.h"
 #endif
+#if __has_include("esp_mesh.h")
+#include "esp_mesh.h"
+#endif
 #if __has_include("esp_now.h")
 #include "esp_now.h"
 #endif
@@ -38,6 +41,7 @@
 #include "tcpip_adapter.h"
 #endif
 
+#ifdef CONFIG_ESP_ERR_TO_NAME_LOOKUP
 #define ERR_TBL_IT(err)    {err, #err}
 
 typedef struct {
@@ -50,35 +54,15 @@ static const esp_err_msg_t esp_err_msg_table[] = {
 #   ifdef      ESP_FAIL
     ERR_TBL_IT(ESP_FAIL),                                   /*    -1 */
 #   endif
-    // components/esp32/include/esp_wifi.h
-#   ifdef      ESP_ERR_WIFI_FAIL
-    ERR_TBL_IT(ESP_ERR_WIFI_FAIL),                          /*    -1 General fail code */
-#   endif
-    // components/esp32/include/esp_err.h
 #   ifdef      ESP_OK
     ERR_TBL_IT(ESP_OK),                                     /*     0 */
 #   endif
-    // components/esp32/include/esp_wifi.h
-#   ifdef      ESP_ERR_WIFI_OK
-    ERR_TBL_IT(ESP_ERR_WIFI_OK),                            /*     0 No error */
-#   endif
-    // components/esp32/include/esp_err.h
 #   ifdef      ESP_ERR_NO_MEM
     ERR_TBL_IT(ESP_ERR_NO_MEM),                             /*   257 0x101 */
 #   endif
-    // components/esp32/include/esp_wifi.h
-#   ifdef      ESP_ERR_WIFI_NO_MEM
-    ERR_TBL_IT(ESP_ERR_WIFI_NO_MEM),                        /*   257 0x101 Out of memory */
-#   endif
-    // components/esp32/include/esp_err.h
 #   ifdef      ESP_ERR_INVALID_ARG
     ERR_TBL_IT(ESP_ERR_INVALID_ARG),                        /*   258 0x102 */
 #   endif
-    // components/esp32/include/esp_wifi.h
-#   ifdef      ESP_ERR_WIFI_ARG
-    ERR_TBL_IT(ESP_ERR_WIFI_ARG),                           /*   258 0x102 Invalid argument */
-#   endif
-    // components/esp32/include/esp_err.h
 #   ifdef      ESP_ERR_INVALID_STATE
     ERR_TBL_IT(ESP_ERR_INVALID_STATE),                      /*   259 0x103 */
 #   endif
@@ -91,11 +75,6 @@ static const esp_err_msg_t esp_err_msg_table[] = {
 #   ifdef      ESP_ERR_NOT_SUPPORTED
     ERR_TBL_IT(ESP_ERR_NOT_SUPPORTED),                      /*   262 0x106 */
 #   endif
-    // components/esp32/include/esp_wifi.h
-#   ifdef      ESP_ERR_WIFI_NOT_SUPPORT
-    ERR_TBL_IT(ESP_ERR_WIFI_NOT_SUPPORT),                   /*   262 0x106 Indicates that API is not supported yet */
-#   endif
-    // components/esp32/include/esp_err.h
 #   ifdef      ESP_ERR_TIMEOUT
     ERR_TBL_IT(ESP_ERR_TIMEOUT),                            /*   263 0x107 */
 #   endif
@@ -286,11 +265,11 @@ static const esp_err_msg_t esp_err_msg_table[] = {
     ERR_TBL_IT(ESP_ERR_WIFI_WPS_SM),                        /* 12341 0x3035 WPS state machine is not initialized */
 #   endif
     // components/esp32/include/esp_now.h
+#   ifdef      ESP_ERR_ESPNOW_BASE
+    ERR_TBL_IT(ESP_ERR_ESPNOW_BASE),                        /* 12388 0x3064 ESPNOW error number base. */
+#   endif
 #   ifdef      ESP_ERR_ESPNOW_NOT_INIT
     ERR_TBL_IT(ESP_ERR_ESPNOW_NOT_INIT),                    /* 12389 0x3065 ESPNOW is not initialized. */
-#   endif
-#   ifdef      ESP_ERR_ESPNOW_BASE
-    ERR_TBL_IT(ESP_ERR_ESPNOW_BASE),                        /* 12389 0x3065 ESPNOW error number base. */
 #   endif
 #   ifdef      ESP_ERR_ESPNOW_ARG
     ERR_TBL_IT(ESP_ERR_ESPNOW_ARG),                         /* 12390 0x3066 Invalid argument */
@@ -313,40 +292,108 @@ static const esp_err_msg_t esp_err_msg_table[] = {
 #   ifdef      ESP_ERR_ESPNOW_IF
     ERR_TBL_IT(ESP_ERR_ESPNOW_IF),                          /* 12396 0x306c Interface error */
 #   endif
-    // components/tcpip_adapter/include/tcpip_adapter.h
-#   ifdef      ESP_ERR_TCPIP_ADAPTER_INVALID_PARAMS
-    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_INVALID_PARAMS),       /* 20480 0x5000 */
+    // components/esp32/include/esp_err.h
+#   ifdef      ESP_ERR_MESH_BASE
+    ERR_TBL_IT(ESP_ERR_MESH_BASE),                          /* 16384 0x4000 Starting number of MESH error codes */
 #   endif
+    // components/esp32/include/esp_mesh.h
+#   ifdef      ESP_ERR_MESH_WIFI_NOT_START
+    ERR_TBL_IT(ESP_ERR_MESH_WIFI_NOT_START),                /* 16385 0x4001 */
+#   endif
+#   ifdef      ESP_ERR_MESH_NOT_INIT
+    ERR_TBL_IT(ESP_ERR_MESH_NOT_INIT),                      /* 16386 0x4002 */
+#   endif
+#   ifdef      ESP_ERR_MESH_NOT_CONFIG
+    ERR_TBL_IT(ESP_ERR_MESH_NOT_CONFIG),                    /* 16387 0x4003 */
+#   endif
+#   ifdef      ESP_ERR_MESH_NOT_START
+    ERR_TBL_IT(ESP_ERR_MESH_NOT_START),                     /* 16388 0x4004 */
+#   endif
+#   ifdef      ESP_ERR_MESH_NOT_SUPPORT
+    ERR_TBL_IT(ESP_ERR_MESH_NOT_SUPPORT),                   /* 16389 0x4005 */
+#   endif
+#   ifdef      ESP_ERR_MESH_NOT_ALLOWED
+    ERR_TBL_IT(ESP_ERR_MESH_NOT_ALLOWED),                   /* 16390 0x4006 */
+#   endif
+#   ifdef      ESP_ERR_MESH_NO_MEMORY
+    ERR_TBL_IT(ESP_ERR_MESH_NO_MEMORY),                     /* 16391 0x4007 */
+#   endif
+#   ifdef      ESP_ERR_MESH_ARGUMENT
+    ERR_TBL_IT(ESP_ERR_MESH_ARGUMENT),                      /* 16392 0x4008 */
+#   endif
+#   ifdef      ESP_ERR_MESH_EXCEED_MTU
+    ERR_TBL_IT(ESP_ERR_MESH_EXCEED_MTU),                    /* 16393 0x4009 */
+#   endif
+#   ifdef      ESP_ERR_MESH_TIMEOUT
+    ERR_TBL_IT(ESP_ERR_MESH_TIMEOUT),                       /* 16394 0x400a */
+#   endif
+#   ifdef      ESP_ERR_MESH_DISCONNECTED
+    ERR_TBL_IT(ESP_ERR_MESH_DISCONNECTED),                  /* 16395 0x400b */
+#   endif
+#   ifdef      ESP_ERR_MESH_QUEUE_FAIL
+    ERR_TBL_IT(ESP_ERR_MESH_QUEUE_FAIL),                    /* 16396 0x400c */
+#   endif
+#   ifdef      ESP_ERR_MESH_QUEUE_FULL
+    ERR_TBL_IT(ESP_ERR_MESH_QUEUE_FULL),                    /* 16397 0x400d */
+#   endif
+#   ifdef      ESP_ERR_MESH_NO_PARENT_FOUND
+    ERR_TBL_IT(ESP_ERR_MESH_NO_PARENT_FOUND),               /* 16398 0x400e */
+#   endif
+#   ifdef      ESP_ERR_MESH_NO_ROUTE_FOUND
+    ERR_TBL_IT(ESP_ERR_MESH_NO_ROUTE_FOUND),                /* 16399 0x400f */
+#   endif
+#   ifdef      ESP_ERR_MESH_OPTION_NULL
+    ERR_TBL_IT(ESP_ERR_MESH_OPTION_NULL),                   /* 16400 0x4010 */
+#   endif
+#   ifdef      ESP_ERR_MESH_OPTION_UNKNOWN
+    ERR_TBL_IT(ESP_ERR_MESH_OPTION_UNKNOWN),                /* 16401 0x4011 */
+#   endif
+#   ifdef      ESP_ERR_MESH_XON_NO_WINDOW
+    ERR_TBL_IT(ESP_ERR_MESH_XON_NO_WINDOW),                 /* 16402 0x4012 */
+#   endif
+#   ifdef      ESP_ERR_MESH_INTERFACE
+    ERR_TBL_IT(ESP_ERR_MESH_INTERFACE),                     /* 16403 0x4013 */
+#   endif
+#   ifdef      ESP_ERR_MESH_DISCARD_DUPLICATE
+    ERR_TBL_IT(ESP_ERR_MESH_DISCARD_DUPLICATE),             /* 16404 0x4014 */
+#   endif
+#   ifdef      ESP_ERR_MESH_DISCARD
+    ERR_TBL_IT(ESP_ERR_MESH_DISCARD),                       /* 16405 0x4015 */
+#   endif
+    // components/tcpip_adapter/include/tcpip_adapter.h
 #   ifdef      ESP_ERR_TCPIP_ADAPTER_BASE
     ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_BASE),                 /* 20480 0x5000 */
 #   endif
+#   ifdef      ESP_ERR_TCPIP_ADAPTER_INVALID_PARAMS
+    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_INVALID_PARAMS),       /* 20481 0x5001 */
+#   endif
 #   ifdef      ESP_ERR_TCPIP_ADAPTER_IF_NOT_READY
-    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_IF_NOT_READY),         /* 20481 0x5001 */
+    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_IF_NOT_READY),         /* 20482 0x5002 */
 #   endif
 #   ifdef      ESP_ERR_TCPIP_ADAPTER_DHCPC_START_FAILED
-    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_DHCPC_START_FAILED),   /* 20482 0x5002 */
+    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_DHCPC_START_FAILED),   /* 20483 0x5003 */
 #   endif
 #   ifdef      ESP_ERR_TCPIP_ADAPTER_DHCP_ALREADY_STARTED
-    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_DHCP_ALREADY_STARTED), /* 20483 0x5003 */
+    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_DHCP_ALREADY_STARTED), /* 20484 0x5004 */
 #   endif
 #   ifdef      ESP_ERR_TCPIP_ADAPTER_DHCP_ALREADY_STOPPED
-    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_DHCP_ALREADY_STOPPED), /* 20484 0x5004 */
+    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_DHCP_ALREADY_STOPPED), /* 20485 0x5005 */
 #   endif
 #   ifdef      ESP_ERR_TCPIP_ADAPTER_NO_MEM
-    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_NO_MEM),               /* 20485 0x5005 */
+    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_NO_MEM),               /* 20486 0x5006 */
 #   endif
 #   ifdef      ESP_ERR_TCPIP_ADAPTER_DHCP_NOT_STOPPED
-    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_DHCP_NOT_STOPPED),     /* 20486 0x5006 */
+    ERR_TBL_IT(ESP_ERR_TCPIP_ADAPTER_DHCP_NOT_STOPPED),     /* 20487 0x5007 */
 #   endif
     // components/lwip/apps/ping/esp_ping.h
-#   ifdef      ESP_ERR_PING_INVALID_PARAMS
-    ERR_TBL_IT(ESP_ERR_PING_INVALID_PARAMS),                /* 24576 0x6000 */
-#   endif
 #   ifdef      ESP_ERR_PING_BASE
     ERR_TBL_IT(ESP_ERR_PING_BASE),                          /* 24576 0x6000 */
 #   endif
+#   ifdef      ESP_ERR_PING_INVALID_PARAMS
+    ERR_TBL_IT(ESP_ERR_PING_INVALID_PARAMS),                /* 24577 0x6001 */
+#   endif
 #   ifdef      ESP_ERR_PING_NO_MEM
-    ERR_TBL_IT(ESP_ERR_PING_NO_MEM),                        /* 24577 0x6001 */
+    ERR_TBL_IT(ESP_ERR_PING_NO_MEM),                        /* 24578 0x6002 */
 #   endif
     // components/spi_flash/include/esp_spi_flash.h
 #   ifdef      ESP_ERR_FLASH_BASE
@@ -359,11 +406,18 @@ static const esp_err_msg_t esp_err_msg_table[] = {
     ERR_TBL_IT(ESP_ERR_FLASH_OP_TIMEOUT),                   /* 65554 0x10012 */
 #   endif
 };
+#endif //CONFIG_ESP_ERR_TO_NAME_LOOKUP
 
-static const char esp_unknown_msg[] = "UNKNOWN ERROR";
+static const char esp_unknown_msg[] =
+#ifdef CONFIG_ESP_ERR_TO_NAME_LOOKUP
+    "ERROR";
+#else
+    "UNKNOWN ERROR";
+#endif //CONFIG_ESP_ERR_TO_NAME_LOOKUP
 
 const char *esp_err_to_name(esp_err_t code)
 {
+#ifdef CONFIG_ESP_ERR_TO_NAME_LOOKUP
     int i;
 
     for (i = 0; i < sizeof(esp_err_msg_table)/sizeof(esp_err_msg_table[0]); ++i) {
@@ -371,12 +425,14 @@ const char *esp_err_to_name(esp_err_t code)
             return esp_err_msg_table[i].msg;
         }
     }
+#endif //CONFIG_ESP_ERR_TO_NAME_LOOKUP
 
     return esp_unknown_msg;
 }
 
 const char *esp_err_to_name_r(esp_err_t code, char *buf, size_t buflen)
 {
+#ifdef CONFIG_ESP_ERR_TO_NAME_LOOKUP
     int i;
 
     for (i = 0; i < sizeof(esp_err_msg_table)/sizeof(esp_err_msg_table[0]); ++i) {
@@ -385,6 +441,7 @@ const char *esp_err_to_name_r(esp_err_t code, char *buf, size_t buflen)
             return buf;
         }
     }
+#endif //CONFIG_ESP_ERR_TO_NAME_LOOKUP
 
     if (strerror_r(code, buf, buflen) == 0) {
         return buf;

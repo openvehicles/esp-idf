@@ -12,26 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "bt_target.h"
+#include "common/bt_target.h"
 #include <stdlib.h>
 #include <string.h>
-#include "btc_common.h"
-#include "btc_dm.h"
-#include "btc_main.h"
-#include "bt_trace.h"
-#include "bt_target.h"
-#include "btc_storage.h"
-#include "btc_ble_storage.h"
+#include "btc/btc_common.h"
+#include "btc/btc_dm.h"
+#include "btc/btc_main.h"
+#include "common/bt_trace.h"
+#include "common/bt_target.h"
+#include "btc/btc_storage.h"
+#include "btc/btc_ble_storage.h"
 #include "esp_gap_ble_api.h"
 #include "btm_int.h"
-#include "bta_api.h"
-#include "bta_gatt_api.h"
-#include "allocator.h"
+#include "bta/bta_api.h"
+#include "bta/bta_gatt_api.h"
+#include "osi/allocator.h"
+#include "btc/btc_manage.h"
+
 
 #if (BTC_GAP_BT_INCLUDED == TRUE)
 #include "btc_gap_bt.h"
-#endif /* BTC_GAP_BT_INCLUDED == TRUE */
 
+static inline void btc_gap_bt_cb_to_app(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
+{
+    esp_bt_gap_cb_t cb = (esp_bt_gap_cb_t)btc_profile_cb_get(BTC_PID_GAP_BT);
+    if (cb) {
+        cb(event, param);
+    }
+}
+#endif /* BTC_GAP_BT_INCLUDED == TRUE */
 /******************************************************************************
 **  Constants & Macros
 ******************************************************************************/
@@ -309,6 +318,7 @@ static void btc_dm_auth_cmpl_evt (tBTA_DM_AUTH_CMPL *p_auth_cmpl)
 
     // Skip SDP for certain  HID Devices
     if (p_auth_cmpl->success) {
+        status = BT_STATUS_SUCCESS;
     } else {
         // Map the HCI fail reason  to  bt status
         switch (p_auth_cmpl->fail_reason) {
@@ -348,6 +358,13 @@ static void btc_dm_auth_cmpl_evt (tBTA_DM_AUTH_CMPL *p_auth_cmpl)
             status =  BT_STATUS_FAIL;
         }
     }
+#if (BTC_GAP_BT_INCLUDED == TRUE)
+    esp_bt_gap_cb_param_t param;
+    param.auth_cmpl.stat = status;
+    memcpy(param.auth_cmpl.bda, p_auth_cmpl->bd_addr, ESP_BD_ADDR_LEN);
+    memcpy(param.auth_cmpl.device_name, p_auth_cmpl->bd_name, ESP_BT_GAP_MAX_BDNAME_LEN + 1);
+    btc_gap_bt_cb_to_app(ESP_BT_GAP_AUTH_CMPL_EVT, &param);
+#endif /* BTC_GAP_BT_INCLUDED == TRUE */
     (void) status;
 }
 
@@ -434,6 +451,12 @@ void btc_dm_sec_cb_handler(btc_msg_t *msg)
         //load the bonding device to the btm layer
         btc_storage_load_bonded_ble_devices();
 #endif  ///SMP_INCLUDED == TRUE
+
+        /* Set initial device name, it can be overwritten later */
+        if (p_data->enable.status == BTA_SUCCESS) {
+            char *initial_device_name = "ESP32";
+            BTA_DmSetDeviceName(initial_device_name);
+        }
         btc_enable_bluetooth_evt(p_data->enable.status);
         break;
     }
@@ -461,11 +484,11 @@ void btc_dm_sec_cb_handler(btc_msg_t *msg)
 #if (SMP_INCLUDED == TRUE)
         bt_bdaddr_t bd_addr;
         rsp_app = true;
-        LOG_ERROR("BTA_DM_DEV_UNPAIRED_EVT");
+        LOG_DEBUG("BTA_DM_DEV_UNPAIRED_EVT");
         memcpy(bd_addr.address, p_data->link_down.bd_addr, sizeof(BD_ADDR));
         btm_set_bond_type_dev(p_data->link_down.bd_addr, BOND_TYPE_UNKNOWN);
         param.remove_bond_dev_cmpl.status = ESP_BT_STATUS_FAIL;
-        
+
         if (p_data->link_down.status == HCI_SUCCESS) {
             //remove the bonded key in the config and nvs flash.
             btc_storage_remove_ble_dev_type(&bd_addr, false);

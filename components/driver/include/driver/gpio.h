@@ -302,6 +302,8 @@ esp_err_t gpio_set_level(gpio_num_t gpio_num, uint32_t level);
 /**
  * @brief  GPIO get input level
  *
+ * @warning If the pad is not configured for input (or input and output) the returned value is always 0.
+ *
  * @param  gpio_num GPIO number. If you want to get the logic level of e.g. pin GPIO16, gpio_num should be GPIO_NUM_16 (16);
  *
  * @return
@@ -387,6 +389,7 @@ esp_err_t gpio_wakeup_disable(gpio_num_t gpio_num);
  * @return
  *     - ESP_OK Success ;
  *     - ESP_ERR_INVALID_ARG GPIO error
+ *     - ESP_ERR_NOT_FOUND No free interrupt found with the specified flags
  */
 esp_err_t gpio_isr_register(void (*fn)(void*), void * arg, int intr_alloc_flags, gpio_isr_handle_t *handle);
 
@@ -444,8 +447,10 @@ esp_err_t gpio_pulldown_dis(gpio_num_t gpio_num);
   *
   * @return
   *     - ESP_OK Success
-  *     - ESP_FAIL Operation fail
   *     - ESP_ERR_NO_MEM No memory to install this service
+  *     - ESP_ERR_INVALID_STATE ISR service already installed.
+  *     - ESP_ERR_NOT_FOUND No free interrupt found with the specified flags
+  *     - ESP_ERR_INVALID_ARG GPIO error
   */
 esp_err_t gpio_install_isr_service(int intr_alloc_flags);
 
@@ -515,6 +520,35 @@ esp_err_t gpio_set_drive_capability(gpio_num_t gpio_num, gpio_drive_cap_t streng
   *     - ESP_ERR_INVALID_ARG Parameter error
   */
 esp_err_t gpio_get_drive_capability(gpio_num_t gpio_num, gpio_drive_cap_t* strength);
+
+/**
+  * @brief Set gpio pad hold function.
+  *
+  * The gpio pad hold function works in both input and output modes, but must be output-capable gpios.
+  * If pad hold enabled:
+  *   in output mode: the output level of the pad will be force locked and can not be changed.
+  *   in input mode: the input value read will not change, regardless the changes of input signal.
+  *
+  * Power down or call gpio_hold_dis will disable this function.
+  *
+  * @param gpio_num GPIO number, only support output-capable GPIOs
+  *
+  * @return
+  *     - ESP_OK Success
+  *     - ESP_ERR_NOT_SUPPORTED Not support pad hold function
+  */
+esp_err_t gpio_hold_en(gpio_num_t gpio_num);
+
+/**
+  * @brief Unset gpio pad hold function.
+  *
+  * @param gpio_num GPIO number, only support output-capable GPIOs
+  *
+  * @return
+  *     - ESP_OK Success
+  *     - ESP_ERR_NOT_SUPPORTED Not support pad hold function
+  */
+ esp_err_t gpio_hold_dis(gpio_num_t gpio_num);
 
 #ifdef __cplusplus
 }

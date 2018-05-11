@@ -22,10 +22,10 @@
  *
  ******************************************************************************/
 #include <string.h>
-#include "bt_target.h"
-#include "avrc_api.h"
+#include "common/bt_target.h"
+#include "stack/avrc_api.h"
 #include "avrc_int.h"
-#include "allocator.h"
+#include "osi/allocator.h"
 
 #if (defined(AVRC_INCLUDED) && AVRC_INCLUDED == TRUE)
 
@@ -355,6 +355,25 @@ void AVRC_Init(void)
 #else
     avrc_cb.trace_level  = BT_TRACE_LEVEL_NONE;
 #endif
+}
+
+/*******************************************************************************
+**
+** Function         AVRC_Deinit
+**
+** Description      This function is called at stack shotdown to free the
+**                  control block (if using dynamic memory), and deinitializes the
+**                  control block and tracing level.
+**
+** Returns          void
+**
+*******************************************************************************/
+void AVRC_Deinit(void)
+{
+#if AVRC_DYNAMIC_MEMORY
+    osi_free(avrc_cb_ptr);
+    avrc_cb_ptr = NULL;
+#endif /* #if AVRC_DYNAMIC_MEMORY */
 }
 
 #endif /* #if (defined(AVRC_INCLUDED) && AVRC_INCLUDED == TRUE) */

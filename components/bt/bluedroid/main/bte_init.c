@@ -23,7 +23,7 @@
  *
  ******************************************************************************/
 
-#include "bt_target.h"
+#include "common/bt_target.h"
 #include <string.h>
 
 
@@ -37,7 +37,7 @@
 
 #if (defined(RFCOMM_INCLUDED) && RFCOMM_INCLUDED == TRUE)
 // Include initialization functions definitions
-#include "port_api.h"
+#include "stack/port_api.h"
 #endif
 
 #if (defined(BNEP_INCLUDED) && BNEP_INCLUDED == TRUE)
@@ -45,7 +45,7 @@
 #endif
 
 #if (defined(GAP_INCLUDED) && GAP_INCLUDED == TRUE)
-#include "gap_api.h"
+#include "stack/gap_api.h"
 #endif
 
 #if (defined(PAN_INCLUDED) && PAN_INCLUDED == TRUE)
@@ -53,11 +53,11 @@
 #endif
 
 #if (defined(AVRC_INCLUDED) && AVRC_INCLUDED == TRUE)
-#include "avrc_api.h"
+#include "stack/avrc_api.h"
 #endif
 
 #if (defined(A2D_INCLUDED) && A2D_INCLUDED == TRUE)
-#include "a2d_api.h"
+#include "stack/a2d_api.h"
 #endif
 
 #if (defined(AVDT_INCLUDED) && AVDT_INCLUDED == TRUE)
@@ -69,7 +69,7 @@
 #endif
 
 #if (defined(HID_HOST_INCLUDED) && HID_HOST_INCLUDED == TRUE)
-#include "hidh_api.h"
+#include "stack/hidh_api.h"
 #endif
 
 #if (defined(MCA_INCLUDED) && MCA_INCLUDED == TRUE)
@@ -77,17 +77,17 @@
 #endif
 
 #if (defined(BLE_INCLUDED) && BLE_INCLUDED == TRUE)
-#include "gatt_api.h"
+#include "stack/gatt_api.h"
 #if (defined(SMP_INCLUDED) && SMP_INCLUDED == TRUE)
-#include "smp_api.h"
+#include "stack/smp_api.h"
 #endif
 #endif
 
 //BTA Modules
 #if BTA_INCLUDED == TRUE && BTA_DYNAMIC_MEMORY == TRUE
-#include "bta_api.h"
-#include "bta_sys.h"
-#include "allocator.h"
+#include "bta/bta_api.h"
+#include "bta/bta_sys.h"
+#include "osi/allocator.h"
 
 //#include "bta_ag_int.h"
 
@@ -173,7 +173,6 @@ void BTE_InitStack(void)
 #endif  // PAN
 #endif  // BNEP Included
 
-
     //AVDT and its profiles
 #if (defined(A2D_INCLUDED) && A2D_INCLUDED == TRUE)
     A2D_Init();
@@ -229,6 +228,12 @@ void BTE_InitStack(void)
     memset((void *)bta_dm_di_cb_ptr, 0, sizeof(tBTA_DM_DI_CB));
     //memset((void *)bta_prm_cb_ptr, 0, sizeof(tBTA_PRM_CB));
     //memset((void *)bta_ag_cb_ptr, 0, sizeof(tBTA_AG_CB));
+#if (defined BTA_JV_INCLUDED && BTA_JV_INCLUDED == TRUE)
+    if ((bta_jv_cb_ptr = (tBTA_JV_CB *)osi_malloc(sizeof(tBTA_JV_CB))) == NULL) {
+        return;
+    }
+    memset((void *)bta_jv_cb_ptr, 0, sizeof(tBTA_JV_CB));
+#endif //JV
 #if BTA_HS_INCLUDED == TRUE
     memset((void *)bta_hs_cb_ptr, 0, sizeof(tBTA_HS_CB));
 #endif
@@ -253,7 +258,7 @@ void BTE_InitStack(void)
 #if BTA_HH_INCLUDED==TRUE
     if ((bta_hh_cb_ptr = (tBTA_HH_CB *)osi_malloc(sizeof(tBTA_HH_CB))) == NULL) {
         return;
-    } 
+    }
     memset((void *)bta_hh_cb_ptr, 0, sizeof(tBTA_HH_CB));
 #endif
 #if BTA_HL_INCLUDED==TRUE
@@ -269,8 +274,6 @@ void BTE_InitStack(void)
     if ((bta_gatts_cb_ptr = (tBTA_GATTS_CB *)osi_malloc(sizeof(tBTA_GATTS_CB))) == NULL) {
         return;
     }
-    memset((void *)bta_gattc_cb_ptr, 0, sizeof(tBTA_GATTC_CB));
-    //
     memset((void *)bta_gatts_cb_ptr, 0, sizeof(tBTA_GATTS_CB));
 #endif
 #if BTA_PAN_INCLUDED==TRUE
@@ -278,4 +281,77 @@ void BTE_InitStack(void)
 #endif
 
 #endif // BTA_INCLUDED == TRUE
+}
+
+/*****************************************************************************
+**
+** Function         BTE_DeinitStack
+**
+** Description      Deinitialize control block memory for each component.
+**
+**                  Note: This API must be called
+**                      after freeing the BTU Task.
+**
+** Returns          void
+**
+******************************************************************************/
+void BTE_DeinitStack(void)
+{
+    //BTA Modules
+#if (BTA_INCLUDED == TRUE && BTA_DYNAMIC_MEMORY == TRUE)
+#if GATTS_INCLUDED == TRUE
+    osi_free(bta_gatts_cb_ptr);
+    bta_gatts_cb_ptr = NULL;
+#endif
+#if GATTC_INCLUDED==TRUE
+    osi_free(bta_gattc_cb_ptr);
+    bta_gattc_cb_ptr = NULL;
+#endif
+#if BTA_HH_INCLUDED==TRUE
+    osi_free(bta_hh_cb_ptr);
+    bta_hh_cb_ptr = NULL;
+#endif
+#if BTA_AV_INCLUDED==TRUE
+    osi_free(bta_av_cb_ptr);
+    bta_av_cb_ptr = NULL;
+#endif
+#if BTA_AR_INCLUDED==TRUE
+    osi_free(bta_ar_cb_ptr);
+    bta_ar_cb_ptr = NULL;
+#endif
+#if BTA_SDP_INCLUDED == TRUE
+    osi_free(bta_sdp_cb_ptr);
+    bta_sdp_cb_ptr = NULL;
+#endif
+#if (defined BTA_JV_INCLUDED && BTA_JV_INCLUDED == TRUE)
+    osi_free(bta_jv_cb_ptr);
+    bta_jv_cb_ptr = NULL;
+#endif //JV
+    osi_free(bta_dm_di_cb_ptr);
+    bta_dm_di_cb_ptr = NULL;
+    osi_free(bta_dm_search_cb_ptr);
+    bta_dm_search_cb_ptr = NULL;
+    osi_free(bta_dm_cb_ptr);
+    bta_dm_cb_ptr = NULL;
+    osi_free(bta_sys_cb_ptr);
+    bta_sys_cb_ptr = NULL;
+#endif // BTA_INCLUDED == TRUE
+
+#if (defined(AVCT_INCLUDED) && AVCT_INCLUDED == TRUE && AVCT_DYNAMIC_MEMORY == TRUE)
+    osi_free(avct_cb_ptr);
+    avct_cb_ptr = NULL;
+#endif
+
+#if (defined(AVDT_INCLUDED) && AVDT_INCLUDED == TRUE && AVDT_DYNAMIC_MEMORY == TRUE)
+    osi_free(avdt_cb_ptr);
+    avdt_cb_ptr = NULL;
+#endif
+
+#if (defined(AVRC_INCLUDED) && AVRC_INCLUDED == TRUE)
+    AVRC_Deinit();
+#endif
+
+#if (defined(A2D_INCLUDED) && A2D_INCLUDED == TRUE)
+    A2D_Deinit();
+#endif
 }

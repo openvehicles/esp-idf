@@ -210,7 +210,11 @@ esp_err_t uart_get_baudrate(uart_port_t uart_num, uint32_t* baudrate)
     UART_ENTER_CRITICAL(&uart_spinlock[uart_num]);
     uint32_t clk_div = (UART[uart_num]->clk_div.div_int << 4) | UART[uart_num]->clk_div.div_frag;
     UART_EXIT_CRITICAL(&uart_spinlock[uart_num]);
-    (*baudrate) = ((UART_CLK_FREQ) << 4) / clk_div;
+    uint32_t uart_clk_freq = esp_clk_apb_freq();
+    if(UART[uart_num]->conf0.tick_ref_always_on == 0) {
+        uart_clk_freq = REF_CLK_FREQ;
+    }
+    (*baudrate) = ((uart_clk_freq) << 4) / clk_div;
     return ESP_OK;
 }
 
@@ -406,6 +410,19 @@ int uart_pattern_pop_pos(uart_port_t uart_num)
     if (pat_pos != NULL && pat_pos->rd != pat_pos->wr) {
         pos = pat_pos->data[pat_pos->rd];
         uart_pattern_dequeue(uart_num);
+    }
+    UART_EXIT_CRITICAL(&uart_spinlock[uart_num]);
+    return pos;
+}
+
+int uart_pattern_get_pos(uart_port_t uart_num)
+{
+    UART_CHECK((p_uart_obj[uart_num]), "uart driver error", (-1));
+    UART_ENTER_CRITICAL(&uart_spinlock[uart_num]);
+    uart_pat_rb_t* pat_pos = &p_uart_obj[uart_num]->rx_pattern_pos;
+    int pos = -1;
+    if (pat_pos != NULL && pat_pos->rd != pat_pos->wr) {
+        pos = pat_pos->data[pat_pos->rd];
     }
     UART_EXIT_CRITICAL(&uart_spinlock[uart_num]);
     return pos;

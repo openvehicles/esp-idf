@@ -21,18 +21,18 @@
  *  this file contains GATT utility functions
  *
  ******************************************************************************/
-#include "bt_target.h"
-#include "allocator.h"
+#include "common/bt_target.h"
+#include "osi/allocator.h"
 
 #if BLE_INCLUDED == TRUE
 #include <string.h>
 #include <stdio.h>
 
-#include "l2cdefs.h"
+#include "stack/l2cdefs.h"
 #include "gatt_int.h"
-#include "gatt_api.h"
-#include "gattdefs.h"
-#include "sdp_api.h"
+#include "stack/gatt_api.h"
+#include "stack/gattdefs.h"
+#include "stack/sdp_api.h"
 #include "btm_int.h"
 /* check if [x, y] and [a, b] have overlapping range */
 #define GATT_VALIDATE_HANDLE_RANGE(x, y, a, b)   (y >= a && x <= b)
@@ -2000,6 +2000,29 @@ BOOLEAN gatt_find_app_hold_link(tGATT_TCB *p_tcb, UINT8 start_idx, UINT8 *p_foun
 
 /*******************************************************************************
 **
+** Function         gatt_find_specific_app_in_hold_link
+**
+** Description      find the specific applicaiton that is holding the specified link
+**
+** Returns         Boolean
+**
+*******************************************************************************/
+BOOLEAN gatt_find_specific_app_in_hold_link(tGATT_TCB *p_tcb, tGATT_IF p_gatt_if)
+{
+    UINT8 i;
+    BOOLEAN found = FALSE;
+
+    for (i = 0; i < GATT_MAX_APPS; i ++) {
+        if (p_tcb->app_hold_link[i] && p_tcb->app_hold_link[i] == p_gatt_if) {
+            found = TRUE;
+            break;
+        }
+    }
+    return found;
+}
+
+/*******************************************************************************
+**
 ** Function         gatt_cmd_enq
 **
 ** Description      Enqueue this command.
@@ -2373,7 +2396,7 @@ tGATT_BG_CONN_DEV *gatt_alloc_bg_dev(BD_ADDR remote_bda)
 **
 ** Function         gatt_add_bg_dev_list
 **
-** Description      add/remove device from the back ground connection device list
+** Description      add/remove device from the background connection device list
 **
 ** Returns          TRUE if device added to the list; FALSE failed
 **
@@ -2513,7 +2536,7 @@ BOOLEAN gatt_find_app_for_bg_dev(BD_ADDR bd_addr, tGATT_IF *p_gatt_if)
 **
 ** Function         gatt_remove_bg_dev_from_list
 **
-** Description      add/remove device from the back ground connection device list or
+** Description      add/remove device from the background connection device list or
 **                  listening to advertising list.
 **
 ** Returns          pointer to the device record
@@ -2576,7 +2599,7 @@ BOOLEAN gatt_remove_bg_dev_from_list(tGATT_REG *p_reg, BD_ADDR bd_addr, BOOLEAN 
 **
 ** Function         gatt_deregister_bgdev_list
 **
-** Description      deregister all related back ground connetion device.
+** Description      deregister all related background connection device.
 **
 ** Returns          pointer to the device record
 **

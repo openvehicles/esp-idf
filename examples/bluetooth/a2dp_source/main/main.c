@@ -244,6 +244,16 @@ void bt_app_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
     }
     case ESP_BT_GAP_RMT_SRVCS_EVT:
     case ESP_BT_GAP_RMT_SRVC_REC_EVT:
+        break;
+    case ESP_BT_GAP_AUTH_CMPL_EVT:{
+        if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGI(BT_AV_TAG, "authentication success: %s", param->auth_cmpl.device_name);
+            esp_log_buffer_hex(BT_AV_TAG, param->auth_cmpl.bda, ESP_BD_ADDR_LEN);
+        } else {
+            ESP_LOGI(BT_AV_TAG, "authentication failed, status:%d", param->auth_cmpl.stat);
+        }
+    }
+
     default: {
         ESP_LOGI(BT_AV_TAG, "event: %d", event);
         break;
@@ -320,7 +330,7 @@ static void a2d_app_heart_beat(void *arg)
 
 static void bt_app_av_sm_hdlr(uint16_t event, void *param)
 {
-    ESP_LOGE(BT_AV_TAG, "%s state %d, evt 0x%x", __func__, m_a2d_state, event);
+    ESP_LOGI(BT_AV_TAG, "%s state %d, evt 0x%x", __func__, m_a2d_state, event);
     switch (m_a2d_state) {
     case APP_AV_STATE_DISCOVERING:
     case APP_AV_STATE_DISCOVERED:

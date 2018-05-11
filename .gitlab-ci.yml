@@ -26,6 +26,8 @@ variables:
 # IDF environment
 
   IDF_PATH: "$CI_PROJECT_DIR"
+  BATCH_BUILD: "1"
+  V: "0"
   APPLY_BOT_FILTER_SCRIPT: "$CI_PROJECT_DIR/tools/ci/apply_bot_filter.py"
   CHECKOUT_REF_SCRIPT: "$CI_PROJECT_DIR/tools/ci/checkout_project_ref.py"
 
@@ -109,17 +111,29 @@ build_template_app:
     BATCH_BUILD: "1"
     V: "0"
 
-build_ssc:
+.build_ssc_template: &build_ssc_template
   <<: *build_template
   artifacts:
     paths:
       - SSC/ssc_bin
-    expire_in: 6 mos
+    expire_in: 1 mos
+  variables:
+    SSC_CONFIG_FOLDER: "$CI_PROJECT_DIR/SSC/configs/ESP32_IDF"
   script:
     - git clone $SSC_REPOSITORY
     - cd SSC
     - python $CHECKOUT_REF_SCRIPT SSC
-    - MAKEFLAGS= ./gen_misc_ng.sh
+    - MAKEFLAGS= ./ci_build_ssc.sh "${CI_JOB_NAME}" "${IDF_PATH}/.gitlab-ci.yml"
+
+# don't forget to add to dependency to test_template when adding new build_ssc jobs
+build_ssc_00:
+  <<: *build_ssc_template
+
+build_ssc_01:
+  <<: *build_ssc_template
+
+build_ssc_02:
+  <<: *build_ssc_template
 
 build_esp_idf_tests:
   <<: *build_template
@@ -140,6 +154,7 @@ build_esp_idf_tests:
 
 .build_examples_template: &build_examples_template
   <<: *build_template
+  retry: 1
   artifacts:
     when: always
     paths:
@@ -196,19 +211,28 @@ build_docs:
   artifacts:
     when: always
     paths:
-      - docs/doxygen-warning-log.txt
-      - docs/sphinx-warning-log.txt
-      - docs/sphinx-warning-log-sanitized.txt
-      - docs/_build/html
+      # English version of documentation
+      - docs/en/doxygen-warning-log.txt
+      - docs/en/sphinx-warning-log.txt
+      - docs/en/sphinx-warning-log-sanitized.txt
+      - docs/en/_build/html
+      # Chinese version of documentation
+      - docs/zh_CN/doxygen-warning-log.txt
+      - docs/zh_CN/sphinx-warning-log.txt
+      - docs/zh_CN/sphinx-warning-log-sanitized.txt
+      - docs/zh_CN/_build/html
     expire_in: 1 mos
   script:
     - cd docs
-    - doxygen
-    # If there are Doxygen warnings, print them and bail out
-    - test $(cat doxygen-warning-log.txt | wc -l) -eq 0 || ( echo "Doxygen pass had some warnings:" && cat doxygen-warning-log.txt && false )
+    - ./check_lang_folder_sync.sh
+    - cd en
     - make gh-linkcheck
     - make html
-    - ./check_doc_warnings.sh
+    - ../check_doc_warnings.sh
+    - cd ../zh_CN
+    - make gh-linkcheck
+    - make html
+    - ../check_doc_warnings.sh
 
 test_nvs_on_host:
   stage: test
@@ -219,6 +243,24 @@ test_nvs_on_host:
   script:
     - cd components/nvs_flash/test_nvs_host
     - make test
+
+test_nvs_coverage:
+  stage: test
+  image: $CI_DOCKER_REGISTRY/esp32-ci-env$BOT_DOCKER_IMAGE_TAG
+  tags:
+    - nvs_host_test
+  dependencies: []
+  artifacts:
+    paths:
+      - components/nvs_flash/test_nvs_host/coverage_report
+  only:
+    - triggers
+  # This job takes a few hours to finish, so only run it on demand
+  variables:
+    BOT_NEEDS_TRIGGER_BY_NAME: 1
+  script:
+    - cd components/nvs_flash/test_nvs_host
+    - make coverage_report
 
 test_partition_table_on_host:
   stage: test
@@ -250,7 +292,7 @@ test_multi_heap_on_host:
     - wl_host_test
   script:
     - cd components/heap/test_multi_heap_host
-    - make test
+    - ./test_all_configs.sh
 
 test_build_system:
   stage: test
@@ -273,6 +315,7 @@ test_report:
   only:
     - master
     - triggers
+    - schedules
     - /^release\/v/
     - /^v\d+\.\d+(\.\d+)?($|-)/
   variables:
@@ -361,7 +404,7 @@ push_master_to_github:
 
 
 deploy_docs:
-  stage: deploy
+  stage: assign_test
   image: $CI_DOCKER_REGISTRY/esp32-ci-env$BOT_DOCKER_IMAGE_TAG
   tags:
     - deploy
@@ -381,11 +424,19 @@ deploy_docs:
     - chmod 600 ~/.ssh/id_rsa
     - echo -e "Host $DOCS_SERVER\n\tStrictHostKeyChecking no\n\tUser $DOCS_SERVER_USER\n" >> ~/.ssh/config
     - export GIT_VER=$(git describe --always)
-    - cd docs/_build/
+    - cd docs/en/_build/
     - mv html $GIT_VER
     - tar czvf $GIT_VER.tar.gz $GIT_VER
-    - scp $GIT_VER.tar.gz $DOCS_SERVER:$DOCS_PATH
-    - ssh $DOCS_SERVER -x "cd $DOCS_PATH && tar xzvf $GIT_VER.tar.gz && rm -f latest && ln -s $GIT_VER latest"
+    - scp $GIT_VER.tar.gz $DOCS_SERVER:$DOCS_PATH/en
+    - ssh $DOCS_SERVER -x "cd $DOCS_PATH/en && tar xzvf $GIT_VER.tar.gz && rm -f latest && ln -s $GIT_VER latest"
+    - cd ../../zh_CN/_build/
+    - mv html $GIT_VER
+    - tar czvf $GIT_VER.tar.gz $GIT_VER
+    - scp $GIT_VER.tar.gz $DOCS_SERVER:$DOCS_PATH/zh_CN
+    - ssh $DOCS_SERVER -x "cd $DOCS_PATH/zh_CN && tar xzvf $GIT_VER.tar.gz && rm -f latest && ln -s $GIT_VER latest"
+    # add link to preview doc
+    - echo "[document preview][en] $CI_DOCKER_REGISTRY/docs/esp-idf/en/${GIT_VER}/index.html"
+    - echo "[document preview][zh_CN] $CI_DOCKER_REGISTRY/docs/esp-idf/zh_CN/${GIT_VER}/index.html"
 
 check_doc_links:
   stage: test
@@ -453,7 +504,7 @@ assign_test:
     EXAMPLE_CONFIG_OUTPUT_PATH: "$CI_PROJECT_DIR/examples/test_configs"
   artifacts:
     paths:
-      - test_bins
+      - $OUTPUT_BIN_PATH
       - components/idf_test/*/CIConfigs
       - components/idf_test/*/TC.sqlite
       - $EXAMPLE_CONFIG_OUTPUT_PATH
@@ -473,7 +524,7 @@ assign_test:
     - cd auto_test_script
     - python $CHECKOUT_REF_SCRIPT auto_test_script
     # assgin integration test cases
-    - python CIAssignTestCases.py -t $IDF_PATH/components/idf_test/integration_test -c $IDF_PATH/.gitlab-ci.yml -b $IDF_PATH/test_bins
+    - python CIAssignTestCases.py -t $IDF_PATH/components/idf_test/integration_test -c $IDF_PATH/.gitlab-ci.yml -b $IDF_PATH/SSC/ssc_bin
 
 .example_test_template: &example_test_template
   stage: test
@@ -483,6 +534,7 @@ assign_test:
     - /^release\/v/
     - /^v\d+\.\d+(\.\d+)?($|-)/
     - triggers
+    - schedules
   # gitlab ci do not support match job with RegEx or wildcard now in dependencies.
   # we have a lot build example jobs and the binaries them exceed the limitation of artifacts.
   # we can't artifact them in one job. For example test jobs, download all artifacts from previous stages.
@@ -522,9 +574,13 @@ assign_test:
     - /^release\/v/
     - /^v\d+\.\d+(\.\d+)?($|-)/
     - triggers
+    - schedules
   allow_failure: true
   dependencies:
     - assign_test
+    - build_ssc_00
+    - build_ssc_01
+    - build_ssc_02
   artifacts:
     when: always
     paths:
@@ -936,6 +992,48 @@ IT_003_07:
     - ESP32_IDF
     - SSC_T2_1
 
+IT_003_08:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T2_1
+
+IT_003_09:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T2_1
+
+IT_003_10:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T2_1
+
+IT_003_11:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T2_1
+
+IT_003_12:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T2_1
+
+IT_003_13:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T2_1
+
+IT_003_14:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T2_1
+
 IT_004_01:
   <<: *test_template
   tags:
@@ -948,29 +1046,17 @@ IT_005_01:
     - ESP32_IDF
     - SSC_T1_WEP
 
-IT_006_01:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T3_PhyMode
-
-IT_007_01:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T2_PhyMode
-
-IT_008_01:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T2_PhyMode
-
 IT_009_01:
   <<: *test_template
   tags:
     - ESP32_IDF
     - SSC_T1_3
+
+IT_010_01:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T5_1
 
 IT_501_01:
   <<: *test_template

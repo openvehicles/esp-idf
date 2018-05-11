@@ -82,14 +82,9 @@ static bool s_core_idle[portNUM_PROCESSORS];
 extern uint32_t g_ticks_per_us_pro;
 
 /* Lookup table of CPU frequencies to be used in each mode.
- * Modified by esp_pm_configure.
+ * Initialized by esp_pm_impl_init and modified by esp_pm_configure.
  */
-rtc_cpu_freq_t s_cpu_freq_by_mode[PM_MODE_COUNT] = {
-        [PM_MODE_LIGHT_SLEEP] = (rtc_cpu_freq_t) -1, /* unused */
-        [PM_MODE_APB_MIN] = RTC_CPU_FREQ_XTAL,
-        [PM_MODE_APB_MAX] = RTC_CPU_FREQ_80M,
-        [PM_MODE_CPU_MAX] = RTC_CPU_FREQ_80M,
-};
+rtc_cpu_freq_t s_cpu_freq_by_mode[PM_MODE_COUNT];
 
 /* Lookup table of CPU ticks per microsecond for each RTC_CPU_FREQ_ value.
  * Essentially the same as returned by rtc_clk_cpu_freq_value(), but without
@@ -114,6 +109,13 @@ static const char* s_freq_names[] __attribute__((unused)) = {
 
 /* Whether automatic light sleep is enabled. Currently always false */
 static bool s_light_sleep_en = false;
+
+/* When configuration is changed, current frequency may not match the
+ * newly configured frequency for the current mode. This is an indicator
+ * to the mode switch code to get the actual current frequency instead of
+ * relying on the current mode.
+ */
+static bool s_config_changed = false;
 
 #ifdef WITH_PROFILING
 /* Time, in microseconds, spent so far in each mode */
@@ -153,6 +155,21 @@ pm_mode_t esp_pm_impl_get_mode(esp_pm_lock_type_t type, int arg)
     }
 }
 
+/* rtc_cpu_freq_t enum is not ordered by frequency, so convert to MHz,
+ * figure out the maximum value, then convert back to rtc_cpu_freq_t.
+ */
+static rtc_cpu_freq_t max_freq_of(rtc_cpu_freq_t f1, rtc_cpu_freq_t f2)
+{
+    int f1_hz = rtc_clk_cpu_freq_value(f1);
+    int f2_hz = rtc_clk_cpu_freq_value(f2);
+    int f_max_hz = MAX(f1_hz, f2_hz);
+    rtc_cpu_freq_t result = RTC_CPU_FREQ_XTAL;
+    if (!rtc_clk_cpu_freq_from_mhz(f_max_hz/1000000, &result)) {
+        assert(false && "unsupported frequency");
+    }
+    return result;
+}
+
 esp_err_t esp_pm_configure(const void* vconfig)
 {
 #ifndef CONFIG_PM_ENABLE
@@ -163,23 +180,34 @@ esp_err_t esp_pm_configure(const void* vconfig)
     if (config->light_sleep_enable) {
         return ESP_ERR_NOT_SUPPORTED;
     }
+
+    if (config->min_cpu_freq == RTC_CPU_FREQ_2M) {
+        /* Minimal APB frequency to achieve 1MHz REF_TICK frequency is 5 MHz */
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
     rtc_cpu_freq_t min_freq = config->min_cpu_freq;
     rtc_cpu_freq_t max_freq = config->max_cpu_freq;
+    int min_freq_mhz = rtc_clk_cpu_freq_value(min_freq);
+    int max_freq_mhz = rtc_clk_cpu_freq_value(max_freq);
+    if (min_freq_mhz > max_freq_mhz) {
+        return ESP_ERR_INVALID_ARG;
+    }
 
-    rtc_cpu_freq_t apb_max_freq; /* CPU frequency in APB_MAX mode */
+    rtc_cpu_freq_t apb_max_freq = max_freq; /* CPU frequency in APB_MAX mode */
     if (max_freq == RTC_CPU_FREQ_240M) {
         /* We can't switch between 240 and 80/160 without disabling PLL,
          * so use 240MHz CPU frequency when 80MHz APB frequency is requested.
          */
         apb_max_freq = RTC_CPU_FREQ_240M;
-    } else {
-        /* Otherwise (max CPU frequency is 80MHz or 160MHz), can use 80MHz
+    } else if (max_freq == RTC_CPU_FREQ_160M || max_freq == RTC_CPU_FREQ_80M) {
+        /* Otherwise, can use 80MHz
          * CPU frequency when 80MHz APB frequency is requested.
          */
         apb_max_freq = RTC_CPU_FREQ_80M;
     }
 
-    apb_max_freq = MAX(apb_max_freq, min_freq);
+    apb_max_freq = max_freq_of(apb_max_freq, min_freq);
 
     ESP_LOGI(TAG, "Frequency switching config: "
                   "CPU_MAX: %s, APB_MAX: %s, APB_MIN: %s, Light sleep: %s",
@@ -192,7 +220,9 @@ esp_err_t esp_pm_configure(const void* vconfig)
     s_cpu_freq_by_mode[PM_MODE_CPU_MAX] = max_freq;
     s_cpu_freq_by_mode[PM_MODE_APB_MAX] = apb_max_freq;
     s_cpu_freq_by_mode[PM_MODE_APB_MIN] = min_freq;
+    s_cpu_freq_by_mode[PM_MODE_LIGHT_SLEEP] = min_freq;
     s_light_sleep_en = config->light_sleep_enable;
+    s_config_changed = true;
     portEXIT_CRITICAL(&s_switch_lock);
 
     return ESP_OK;
@@ -327,10 +357,17 @@ static void IRAM_ATTR do_switch(pm_mode_t new_mode)
     } while (true);
     s_new_mode = new_mode;
     s_is_switching = true;
+    bool config_changed = s_config_changed;
+    s_config_changed = false;
     portEXIT_CRITICAL_ISR(&s_switch_lock);
 
-    rtc_cpu_freq_t old_freq = s_cpu_freq_by_mode[s_mode];
     rtc_cpu_freq_t new_freq = s_cpu_freq_by_mode[new_mode];
+    rtc_cpu_freq_t old_freq;
+    if (!config_changed) {
+        old_freq = s_cpu_freq_by_mode[s_mode];
+    } else {
+        old_freq = rtc_clk_cpu_freq_get();
+    }
 
     if (new_freq != old_freq) {
         uint32_t old_ticks_per_us = g_ticks_per_us_pro;
@@ -430,9 +467,15 @@ void esp_pm_impl_dump_stats(FILE* out)
 
     time_in_mode[cur_mode] += now - last_mode_change_time;
 
+    fprintf(out, "Mode stats:\n");
     for (int i = 0; i < PM_MODE_COUNT; ++i) {
-        fprintf(out, "%8s  %12lld  %2d%%\n",
+        if (i == PM_MODE_LIGHT_SLEEP && !s_light_sleep_en) {
+            /* don't display light sleep mode if it's not enabled */
+            continue;
+        }
+        fprintf(out, "%8s %6s %12lld  %2d%%\n",
                 s_mode_names[i],
+                s_freq_names[s_cpu_freq_by_mode[i]],
                 time_in_mode[i],
                 (int) (time_in_mode[i] * 100 / now));
     }
@@ -453,4 +496,15 @@ void esp_pm_impl_init()
             &s_rtos_lock_handle[1]));
     ESP_ERROR_CHECK(esp_pm_lock_acquire(s_rtos_lock_handle[1]));
 #endif // portNUM_PROCESSORS == 2
+
+    /* Configure all modes to use the default CPU frequency.
+     * This will be modified later by a call to esp_pm_configure.
+     */
+    rtc_cpu_freq_t default_freq;
+    if (!rtc_clk_cpu_freq_from_mhz(CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ, &default_freq)) {
+        assert(false && "unsupported frequency");
+    }
+    for (size_t i = 0; i < PM_MODE_COUNT; ++i) {
+        s_cpu_freq_by_mode[i] = default_freq;
+    }
 }

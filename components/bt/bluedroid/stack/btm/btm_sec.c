@@ -27,14 +27,14 @@
 #include <stdarg.h>
 #include <string.h>
 
-#include "bt_types.h"
-#include "controller.h"
-#include "hcimsgs.h"
-#include "btu.h"
+#include "stack/bt_types.h"
+#include "device/controller.h"
+#include "stack/hcimsgs.h"
+#include "stack/btu.h"
 #include "btm_int.h"
 #include "l2c_int.h"
-#include "fixed_queue.h"
-#include "alarm.h"
+#include "osi/fixed_queue.h"
+#include "osi/alarm.h"
 
 #if (BT_USE_TRACES == TRUE && BT_TRACE_VERBOSE == FALSE)
 /* needed for sprintf() */
@@ -90,7 +90,7 @@ static tBTM_STATUS btm_sec_send_hci_disconnect (tBTM_SEC_DEV_REC *p_dev_rec, UIN
 UINT8           btm_sec_start_role_switch (tBTM_SEC_DEV_REC *p_dev_rec);
 tBTM_SEC_DEV_REC *btm_sec_find_dev_by_sec_state (UINT8 state);
 
-static BOOLEAN  btm_sec_set_security_level ( CONNECTION_TYPE conn_type, char *p_name, UINT8 service_id,
+static BOOLEAN  btm_sec_set_security_level ( CONNECTION_TYPE conn_type, const char *p_name, UINT8 service_id,
         UINT16 sec_level, UINT16 psm, UINT32 mx_proto_id,
         UINT32 mx_chan_id);
 #if (SMP_INCLUDED == TRUE)
@@ -459,7 +459,7 @@ void BTM_SetSecureConnectionsOnly (BOOLEAN secure_connections_only_mode)
 ** Returns          TRUE if registered OK, else FALSE
 **
 *******************************************************************************/
-BOOLEAN BTM_SetSecurityLevel (BOOLEAN is_originator, char *p_name, UINT8 service_id,
+BOOLEAN BTM_SetSecurityLevel (BOOLEAN is_originator, const char *p_name, UINT8 service_id,
                               UINT16 sec_level, UINT16 psm, UINT32 mx_proto_id,
                               UINT32 mx_chan_id)
 {
@@ -499,7 +499,7 @@ BOOLEAN BTM_SetSecurityLevel (BOOLEAN is_originator, char *p_name, UINT8 service
 ** Returns          TRUE if registered OK, else FALSE
 **
 *******************************************************************************/
-static BOOLEAN btm_sec_set_security_level (CONNECTION_TYPE conn_type, char *p_name, UINT8 service_id,
+static BOOLEAN btm_sec_set_security_level (CONNECTION_TYPE conn_type, const char *p_name, UINT8 service_id,
         UINT16 sec_level, UINT16 psm, UINT32 mx_proto_id,
         UINT32 mx_chan_id)
 {
@@ -2598,7 +2598,6 @@ tBTM_STATUS btm_sec_mx_access_request (BD_ADDR bd_addr, UINT16 psm, BOOLEAN is_o
 void btm_sec_conn_req (UINT8 *bda, UINT8 *dc)
 {
     tBTM_SEC_DEV_REC  *p_dev_rec = btm_find_dev (bda);
-    BTM_TRACE_ERROR ("%s\n", __func__);
     /* Some device may request a connection before we are done with the HCI_Reset sequence */
     if (!controller_get_interface()->get_is_ready()) {
         BTM_TRACE_ERROR ("Security Manager: connect request when device not ready\n");
@@ -4209,7 +4208,6 @@ void btm_sec_connected (UINT8 *bda, UINT16 handle, UINT8 status, UINT8 enc_mode)
 
     btm_acl_resubmit_page();
 
-    BTM_TRACE_ERROR ("%s\n", __func__);
     /* Commenting out trace due to obf/compilation problems.
     */
 #if (BT_USE_TRACES == TRUE && SMP_INCLUDED == TRUE)
@@ -5971,7 +5969,7 @@ static void btm_sec_check_pending_enc_req (tBTM_SEC_DEV_REC  *p_dev_rec, tBT_TRA
                 if (p_e->p_callback) {
                     (*p_e->p_callback) (p_dev_rec->bd_addr, transport, p_e->p_ref_data, res);
                 }
-				
+
 				fixed_queue_try_remove_from_queue(btm_cb.sec_pending_q, (void *)p_e);
             }
         }

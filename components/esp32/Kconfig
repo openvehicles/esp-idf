@@ -20,13 +20,6 @@ config ESP32_DEFAULT_CPU_FREQ_MHZ
     default 160 if ESP32_DEFAULT_CPU_FREQ_160
     default 240 if ESP32_DEFAULT_CPU_FREQ_240
 
-config MEMMAP_SMP
-    bool "Reserve memory for two cores"
-    default "y"
-    help
-        The ESP32 contains two cores. If you plan to only use one, you can disable this item
-        to save some memory. (ToDo: Make this automatically depend on unicore support)
-
 config SPIRAM_SUPPORT
     bool "Support for external, SPI-connected RAM"
     default "n"
@@ -69,6 +62,7 @@ config SPIRAM_USE_CAPS_ALLOC
     bool "Make RAM allocatable using heap_caps_malloc(..., MALLOC_CAP_SPIRAM)"
 config SPIRAM_USE_MALLOC
     bool "Make RAM allocatable using malloc() as well"
+    select SUPPORT_STATIC_ALLOCATION
 endchoice
 
 choice SPIRAM_TYPE
@@ -197,7 +191,7 @@ config ESP32_TRAX
 config ESP32_TRAX_TWOBANKS
     bool "Reserve memory for tracing both pro as well as app cpu execution"
     default "n"
-    depends on ESP32_TRAX && MEMMAP_SMP
+    depends on ESP32_TRAX && !FREERTOS_UNICORE
     select MEMMAP_TRACEMEM_TWOBANKS
     help
         The ESP32 contains a feature which allows you to trace the execution path the processor
@@ -714,6 +708,16 @@ config ESP32_RTC_CLK_CAL_CYCLES
         - 150000 Hz if internal RC oscillator is used as clock source
         - 32768 Hz if the 32k crystal oscillator is used
 
+config ESP32_RTC_XTAL_BOOTSTRAP_CYCLES
+    int "Bootstrap cycles for external 32kHz crystal"
+    default 100
+    range 0 32768
+    help
+        To reduce the startup time of an external RTC crystal, 
+        we bootstrap it with a 32kHz square wave for a fixed number of cycles. 
+        Setting 0 will disable bootstrapping (if disabled, the crystal may take 
+        longer to start up or fail to oscillate under some conditions).
+
 config ESP32_DEEP_SLEEP_WAKEUP_DELAY
     int "Extra delay in deep sleep wake stub (in us)"
     default 2000
@@ -809,6 +813,16 @@ config COMPATIBLE_PRE_V2_1_BOOTLOADERS
 
         Enabling this setting adds approximately 1KB to the app's IRAM usage.
 
+config ESP_ERR_TO_NAME_LOOKUP
+    bool "Enable lookup of error code strings"
+    default "y"
+    help
+        Functions esp_err_to_name() and esp_err_to_name_r() return string
+        representations of error codes from a pre-generated lookup table.
+        This option can be used to turn off the use of the look-up table in
+        order to save memory but this comes at the price of sacrificing
+        distinguishable (meaningful) output string representations.
+
 endmenu  # ESP32-Specific
 
 menu Wi-Fi
@@ -816,12 +830,40 @@ menu Wi-Fi
 config SW_COEXIST_ENABLE
     bool "Software controls WiFi/Bluetooth coexistence"
     depends on BT_ENABLED
-    default n
+    default y
     help
         If enabled, WiFi & Bluetooth coexistence is controlled by software rather than hardware.
         Recommended for heavy traffic scenarios. Both coexistence configuration options are
         automatically managed, no user intervention is required.
 
+choice SW_COEXIST_PREFERENCE
+    prompt "WiFi/Bluetooth coexistence performance preference"
+    depends on SW_COEXIST_ENABLE
+    default SW_COEXIST_PREFERENCE_BALANCE
+    help
+        Choose Bluetooth/WiFi/Balance for different preference.
+        If choose WiFi, it will make WiFi performance better. Such, keep WiFi Audio more fluent.
+        If choose Bluetooth, it will make Bluetooth performance better. Such, keep Bluetooth(A2DP) Audio more fluent.
+        If choose Balance, the performance of WiFi and bluetooth will be balance. It's default. Normally, just choose balance, the A2DP audio can play fluently, too.
+        Except config preference in menuconfig, you can also call esp_coex_preference_set() dynamically.
+
+config SW_COEXIST_PREFERENCE_WIFI
+    bool "WiFi"
+
+config SW_COEXIST_PREFERENCE_BT
+    bool "Bluetooth(include BR/EDR and BLE)"
+
+config SW_COEXIST_PREFERENCE_BALANCE
+    bool "Balance"
+
+endchoice
+
+config SW_COEXIST_PREFERENCE_VALUE
+    int
+    depends on SW_COEXIST_ENABLE
+    default 0 if SW_COEXIST_PREFERENCE_WIFI
+    default 1 if SW_COEXIST_PREFERENCE_BT
+    default 2 if SW_COEXIST_PREFERENCE_BALANCE
 
 config ESP32_WIFI_STATIC_RX_BUFFER_NUM
     int "Max number of WiFi static RX buffers"

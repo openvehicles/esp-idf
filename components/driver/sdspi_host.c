@@ -34,6 +34,8 @@
 #define GPIO_UNUSED 0xff                //!< Flag indicating that CD/WP is unused
 /// Size of the buffer returned by get_block_buf
 #define SDSPI_BLOCK_BUF_SIZE    (SDSPI_MAX_DATA_LEN + 4)
+/// Maximum number of dummy bytes between the request and response (minimum is 1)
+#define SDSPI_RESPONSE_MAX_DELAY  8
 
 
 /// Structure containing run time configuration for a single SD slot
@@ -308,22 +310,22 @@ esp_err_t sdspi_host_init_slot(int slot, const sdspi_slot_config_t* slot_config)
     // Configure CD and WP pins
     io_conf = (gpio_config_t) {
         .intr_type = GPIO_PIN_INTR_DISABLE,
-        .mode = GPIO_MODE_OUTPUT,
+        .mode = GPIO_MODE_INPUT,
         .pin_bit_mask = 0,
         .pull_up_en = true
     };
     if (slot_config->gpio_cd != SDSPI_SLOT_NO_CD) {
         io_conf.pin_bit_mask |= (1 << slot_config->gpio_cd);
-        s_slots[slot].gpio_wp = slot_config->gpio_wp;
+        s_slots[slot].gpio_cd = slot_config->gpio_cd;
     } else {
-        s_slots[slot].gpio_wp = GPIO_UNUSED;
+        s_slots[slot].gpio_cd = GPIO_UNUSED;
     }
 
     if (slot_config->gpio_wp != SDSPI_SLOT_NO_WP) {
         io_conf.pin_bit_mask |= (1 << slot_config->gpio_wp);
-        s_slots[slot].gpio_cd = slot_config->gpio_cd;
+        s_slots[slot].gpio_wp = slot_config->gpio_wp;
     } else {
-        s_slots[slot].gpio_cd = GPIO_UNUSED;
+        s_slots[slot].gpio_wp = GPIO_UNUSED;
     }
 
     if (io_conf.pin_bit_mask != 0) {
@@ -392,7 +394,7 @@ esp_err_t sdspi_host_start_command(int slot, sdspi_hw_cmd_t *cmd, void *data,
     release_bus(slot);
 
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "%s: cmd=%d error=0x%x", __func__, cmd_index, ret);
+        ESP_LOGD(TAG, "%s: cmd=%d error=0x%x", __func__, cmd_index, ret);
     } else {
         // Update internal state when some commands are sent successfully
         if (cmd_index == SD_CRC_ON_OFF) {
@@ -406,7 +408,8 @@ esp_err_t sdspi_host_start_command(int slot, sdspi_hw_cmd_t *cmd, void *data,
 static esp_err_t start_command_default(int slot, int flags, sdspi_hw_cmd_t *cmd)
 {
     size_t cmd_size = SDSPI_CMD_R1_SIZE;
-    if (flags & SDSPI_CMD_FLAG_RSP_R1) {
+    if ((flags & SDSPI_CMD_FLAG_RSP_R1) ||
+        (flags & SDSPI_CMD_FLAG_NORSP)) {
         cmd_size = SDSPI_CMD_R1_SIZE;
     } else if (flags & SDSPI_CMD_FLAG_RSP_R2) {
         cmd_size = SDSPI_CMD_R2_SIZE;
@@ -422,6 +425,35 @@ static esp_err_t start_command_default(int slot, int flags, sdspi_hw_cmd_t *cmd)
         .rx_buffer = cmd
     };
     esp_err_t ret = spi_device_transmit(spi_handle(slot), &t);
+    if (cmd->cmd_index == MMC_STOP_TRANSMISSION) {
+        /* response is a stuff byte from previous transfer, ignore it */
+        cmd->r1 = 0xff;
+    }
+    if (flags & SDSPI_CMD_FLAG_NORSP) {
+        /* no (correct) response expected from the card, so skip polling loop */
+        ESP_LOGV(TAG, "%s: ignoring response byte", __func__);
+        cmd->r1 = 0x00;
+    }
+    int response_delay_bytes = SDSPI_RESPONSE_MAX_DELAY;
+    while ((cmd->r1 & SD_SPI_R1_NO_RESPONSE) != 0 && response_delay_bytes-- > 0) {
+        spi_transaction_t* t = get_transaction(slot);
+        *t = (spi_transaction_t) {
+            .flags = SPI_TRANS_USE_RXDATA | SPI_TRANS_USE_TXDATA,
+            .length = 8,
+        };
+        t->tx_data[0] = 0xff;
+        ret = spi_device_transmit(spi_handle(slot), t);
+        uint8_t r1 = t->rx_data[0];
+        release_transaction(slot);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+        cmd->r1 = r1;
+    }
+    if (cmd->r1 & SD_SPI_R1_NO_RESPONSE) {
+        ESP_LOGD(TAG, "%s: no response token found", __func__);
+        return ESP_ERR_TIMEOUT;
+    }
     return ret;
 }
 
@@ -564,6 +596,9 @@ static esp_err_t poll_data_token(int slot, spi_transaction_t* t,
  *    indicating the start of the next block. Actual scanning is done by
  *    setting pre_scan_data_ptr to point to these last 2 bytes, and setting
  *    pre_scan_data_size = 2, then going to step 2 to receive the next block.
+ *    When the final block is being received, the number of extra bytes is 2
+ *    (only for CRC), because we don't need to wait for start token of the
+ *    next block, and some cards are getting confused by these two extra bytes.
  *
  * With this approach the delay between blocks of a multi-block transfer is
  * ~95 microseconds, out of which 35 microseconds are spend doing the CRC check.
@@ -576,7 +611,7 @@ static esp_err_t start_command_read_blocks(int slot, sdspi_hw_cmd_t *cmd,
     bool need_stop_command = rx_length > SDSPI_MAX_DATA_LEN;
     spi_transaction_t* t_command = get_transaction(slot);
     *t_command = (spi_transaction_t) {
-        .length = (SDSPI_CMD_R1_SIZE + 8) * 8,
+        .length = (SDSPI_CMD_R1_SIZE + SDSPI_RESPONSE_MAX_DELAY) * 8,
         .tx_buffer = cmd,
         .rx_buffer = cmd,
     };
@@ -587,9 +622,21 @@ static esp_err_t start_command_read_blocks(int slot, sdspi_hw_cmd_t *cmd,
     release_transaction(slot);
 
     uint8_t* cmd_u8 = (uint8_t*) cmd;
-    size_t pre_scan_data_size = 8;
+    size_t pre_scan_data_size = SDSPI_RESPONSE_MAX_DELAY;
     uint8_t* pre_scan_data_ptr = cmd_u8 + SDSPI_CMD_R1_SIZE;
 
+    /* R1 response is delayed by 1-8 bytes from the request.
+     * This loop searches for the response and writes it to cmd->r1.
+     */
+    while ((cmd->r1 & SD_SPI_R1_NO_RESPONSE) != 0 && pre_scan_data_size > 0) {
+        cmd->r1 = *pre_scan_data_ptr;
+        ++pre_scan_data_ptr;
+        --pre_scan_data_size;
+    }
+    if (cmd->r1 & SD_SPI_R1_NO_RESPONSE) {
+        ESP_LOGD(TAG, "no response token found");
+        return ESP_ERR_TIMEOUT;
+    }
 
     while (rx_length > 0) {
         size_t extra_data_size = 0;
@@ -627,7 +674,7 @@ static esp_err_t start_command_read_blocks(int slot, sdspi_hw_cmd_t *cmd,
         }
 
         // receive actual data
-        const size_t receive_extra_bytes = 4;
+        const size_t receive_extra_bytes = (rx_length > SDSPI_MAX_DATA_LEN) ? 4 : 2;
         memset(rx_data, 0xff, will_receive + receive_extra_bytes);
         spi_transaction_t* t_data = get_transaction(slot);
         *t_data = (spi_transaction_t) {
@@ -681,6 +728,9 @@ static esp_err_t start_command_read_blocks(int slot, sdspi_hw_cmd_t *cmd,
         ret = start_command_default(slot, SDSPI_CMD_FLAG_RSP_R1, &stop_cmd);
         if (ret != ESP_OK) {
             return ret;
+        }
+        if (stop_cmd.r1 != 0) {
+            ESP_LOGD(TAG, "%s: STOP_TRANSMISSION response 0x%02x", __func__, stop_cmd.r1);
         }
         spi_transaction_t* t_poll = get_transaction(slot);
         ret = poll_busy(slot, t_poll, cmd->timeout_ms);

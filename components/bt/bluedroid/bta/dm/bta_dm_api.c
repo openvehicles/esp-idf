@@ -22,15 +22,15 @@
  *
  ******************************************************************************/
 
-#include "bta_sys.h"
-#include "bta_api.h"
+#include "bta/bta_sys.h"
+#include "bta/bta_api.h"
 #include "bta_dm_int.h"
 #include "bta_sys_int.h"
-#include "btm_api.h"
+#include "stack/btm_api.h"
 #include "btm_int.h"
 #include <string.h>
-#include "utl.h"
-#include "allocator.h"
+#include "bta/utl.h"
+#include "osi/allocator.h"
 
 /*****************************************************************************
 **  Constants
@@ -1631,6 +1631,30 @@ void BTA_DmBleConfigLocalPrivacy(BOOLEAN privacy_enable, tBTA_SET_LOCAL_PRIVACY_
 #if BLE_INCLUDED == TRUE
 /*******************************************************************************
 **
+** Function         BTA_DmBleConfigLocalIcon
+**
+** Description      set gap local icon
+**
+** Parameters:      icon   - appearance value.
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_DmBleConfigLocalIcon(uint16_t icon)
+{
+    tBTA_DM_API_LOCAL_ICON *p_msg;
+
+    if ((p_msg = (tBTA_DM_API_LOCAL_ICON *) osi_malloc(sizeof(tBTA_DM_API_LOCAL_ICON))) != NULL) {
+        memset (p_msg, 0, sizeof(tBTA_DM_API_LOCAL_ICON));
+
+        p_msg->hdr.event = BTA_DM_API_LOCAL_ICON_EVT;
+        p_msg->icon   = icon;
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
 ** Function         BTA_BleEnableAdvInstance
 **
 ** Description      This function enable a Multi-ADV instance with the specififed
@@ -2284,12 +2308,12 @@ extern void BTA_DmBleStopAdvertising(void)
 ** Description      This function set the random address for the APP
 **
 ** Parameters       rand_addr: the random address whith should be setting
-**
+**                  p_set_rand_addr_cback: complete callback
 ** Returns          void
 **
 **
 *******************************************************************************/
-extern void BTA_DmSetRandAddress(BD_ADDR rand_addr)
+extern void BTA_DmSetRandAddress(BD_ADDR rand_addr, tBTA_SET_RAND_ADDR_CBACK *p_set_rand_addr_cback)
 {
     tBTA_DM_APT_SET_DEV_ADDR *p_msg;
     APPL_TRACE_API("set the random address ");
@@ -2298,6 +2322,7 @@ extern void BTA_DmSetRandAddress(BD_ADDR rand_addr)
         memcpy(p_msg->address, rand_addr, BD_ADDR_LEN);
         p_msg->hdr.event = BTA_DM_API_SET_RAND_ADDR_EVT;
         p_msg->addr_type = BLE_ADDR_RANDOM;
+        p_msg->p_set_rand_addr_cback = p_set_rand_addr_cback;
         //start sent the msg to the bta system control moudle
         bta_sys_sendmsg(p_msg);
     }

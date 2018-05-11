@@ -23,27 +23,28 @@
  *
  ******************************************************************************/
 
-#include "bt_target.h"
-#include "bt_types.h"
-#include "bta_sys.h"
-#include "bta_api.h"
+#include "common/bt_target.h"
+#include "stack/bt_types.h"
+#include "bta/bta_sys.h"
+#include "bta/bta_api.h"
 #include "bta_dm_int.h"
-#include "bta_dm_co.h"
-#include "btm_api.h"
+#include "bta/bta_dm_co.h"
+#include "bta/bta_gattc_co.h"
+#include "stack/btm_api.h"
 #include "btm_int.h"
-#include "btu.h"
-#include "sdp_api.h"
-#include "l2c_api.h"
-#include "utl.h"
-#include "gap_api.h"    /* For GAP_BleReadPeerPrefConnParams */
+#include "stack/btu.h"
+#include "stack/sdp_api.h"
+#include "stack/l2c_api.h"
+#include "bta/utl.h"
+#include "stack/gap_api.h"    /* For GAP_BleReadPeerPrefConnParams */
 #include <string.h>
-#include "controller.h"
+#include "device/controller.h"
 
 #define LOG_TAG "bt_bta_dm"
 // #include "osi/include/log.h"
 
 #if (GAP_INCLUDED == TRUE)
-#include "gap_api.h"
+#include "stack/gap_api.h"
 #endif
 
 static void bta_dm_inq_results_cb (tBTM_INQ_RESULTS *p_inq, UINT8 *p_eir);
@@ -168,10 +169,10 @@ const UINT16 bta_service_id_to_uuid_lkup_tbl [BTA_MAX_SERVICE_ID] = {
 
 /*
  * NOTE : The number of element in bta_service_id_to_btm_srv_id_lkup_tbl should be matching with
- *        the value BTA_MAX_SERVICE_ID in bta_api.h
+ *        the value BTA_MAX_SERVICE_ID in bta/bta_api.h
  *
  *        i.e., If you add new Service ID for BTA, the correct security ID of the new service
- *              from Security service definitions (btm_api.h) should be added to this lookup table.
+ *              from Security service definitions (stack/btm_api.h) should be added to this lookup table.
  */
 const UINT32 bta_service_id_to_btm_srv_id_lkup_tbl [BTA_MAX_SERVICE_ID] = {
     0,                                      /* Reserved */
@@ -404,6 +405,10 @@ static void bta_dm_sys_hw_cback( tBTA_SYS_HW_EVT status )
         BTM_SetDeviceClass (dev_class);
 
 #if (defined BLE_INCLUDED && BLE_INCLUDED == TRUE)
+#if (GATTC_INCLUDED == TRUE)
+        // load the gattc cache address list
+        bta_gattc_co_cache_addr_init();
+#endif /* #if (GATTC_INCLUDED = TRUE) */
         /* load BLE local information: ID keys, ER if available */
         bta_dm_co_ble_load_local_keys(&key_mask, er, &id_key);
 
@@ -3118,7 +3123,7 @@ static BOOLEAN bta_dm_check_av(UINT16 event)
     }
 #endif
 
-    APPL_TRACE_WARNING("bta_dm_check_av:%d", bta_dm_cb.cur_av_count);
+    APPL_TRACE_EVENT("bta_dm_check_av:%d", bta_dm_cb.cur_av_count);
     if (bta_dm_cb.cur_av_count) {
         for (i = 0; i < bta_dm_cb.device_list.count; i++) {
             p_dev = &bta_dm_cb.device_list.peer_device[i];
@@ -3442,7 +3447,7 @@ static void bta_dm_rm_cback(tBTA_SYS_CONN_STATUS status, UINT8 id, UINT8 app_id,
 #endif  ///BTM_SSR_INCLUDED == TRUE
             }
         }
-        APPL_TRACE_WARNING("bta_dm_rm_cback:%d, status:%d", bta_dm_cb.cur_av_count, status);
+        APPL_TRACE_EVENT("bta_dm_rm_cback:%d, status:%d", bta_dm_cb.cur_av_count, status);
     }
 
     /* Don't adjust roles for each busy/idle state transition to avoid
@@ -4625,14 +4630,18 @@ void bta_dm_ble_disconnect (tBTA_DM_MSG *p_data)
 *******************************************************************************/
 void bta_dm_ble_set_rand_address(tBTA_DM_MSG *p_data)
 {
-    BOOLEAN set_flag = false;
+    tBTM_STATUS status = BTM_SET_STATIC_RAND_ADDR_FAIL;
     if (p_data->set_addr.addr_type != BLE_ADDR_RANDOM) {
         APPL_TRACE_ERROR("Invalid random adress type = %d\n", p_data->set_addr.addr_type);
+        if(p_data->set_addr.p_set_rand_addr_cback) {
+            (*p_data->set_addr.p_set_rand_addr_cback)(status);
+        }
         return;
     }
     //send the setting random address to BTM layer
-    if ((set_flag = BTM_BleSetRandAddress(p_data->set_addr.address) != TRUE)){
-        APPL_TRACE_ERROR("%s,set random address fail.", __func__);
+    status = BTM_BleSetRandAddress(p_data->set_addr.address);
+    if(p_data->set_addr.p_set_rand_addr_cback) {
+        (*p_data->set_addr.p_set_rand_addr_cback)(status);
     }
 
 }
@@ -4672,6 +4681,19 @@ void bta_dm_ble_config_local_privacy (tBTA_DM_MSG *p_data)
     BTM_BleConfigPrivacy (p_data->ble_local_privacy.privacy_enable, p_data->ble_local_privacy.set_local_privacy_cback);
 }
 #endif
+
+/*******************************************************************************
+**
+** Function         bta_dm_ble_config_local_icon
+**
+** Description      This function sets the local icon value.
+**
+**
+*******************************************************************************/
+void bta_dm_ble_config_local_icon (tBTA_DM_MSG *p_data)
+{
+    BTM_BleConfigLocalIcon (p_data->ble_local_icon.icon);
+}
 
 /*******************************************************************************
 **
@@ -4902,25 +4924,26 @@ void bta_dm_ble_set_scan_rsp_raw (tBTA_DM_MSG *p_data)
 void bta_dm_ble_set_data_length(tBTA_DM_MSG *p_data)
 {
     tACL_CONN *p_acl_cb = btm_bda_to_acl(p_data->ble_set_data_length.remote_bda, BT_TRANSPORT_LE);
-     if (p_acl_cb == NULL) {
-         APPL_TRACE_ERROR("%s error: Invalid connection remote_bda.", __func__);
-         return;
-     } else {
-         p_acl_cb->p_set_pkt_data_cback = p_data->ble_set_data_length.p_set_pkt_data_cback;
-     }
-     UINT8 status = BTM_SetBleDataLength(p_data->ble_set_data_length.remote_bda,
-                                         p_data->ble_set_data_length.tx_data_length);
-     if (status != BTM_SUCCESS) {
-        APPL_TRACE_ERROR("%s failed\n", __FUNCTION__);
-        if (p_data->ble_set_data_length.p_set_pkt_data_cback) {
-            if (p_acl_cb->data_length_params.tx_len == 0){
-                uint16_t length = controller_get_interface()->get_acl_data_size_ble();
-                p_acl_cb->data_length_params.rx_len = length;
-                p_acl_cb->data_length_params.tx_len = length;
-            }
-            (*p_data->ble_set_data_length.p_set_pkt_data_cback)(status, &p_acl_cb->data_length_params);
-        }
+    if (p_acl_cb == NULL) {
+        APPL_TRACE_ERROR("%s error: Invalid connection remote_bda.", __func__);
+        return;
+    } else {
+        p_acl_cb->p_set_pkt_data_cback = p_data->ble_set_data_length.p_set_pkt_data_cback;
     }
+    UINT8 status = BTM_SetBleDataLength(p_data->ble_set_data_length.remote_bda,
+                                        p_data->ble_set_data_length.tx_data_length);
+    if (status != BTM_SUCCESS) {
+        APPL_TRACE_ERROR("%s failed\n", __FUNCTION__);
+    }
+    if (p_data->ble_set_data_length.p_set_pkt_data_cback) {
+        if (p_acl_cb->data_length_params.tx_len == 0){
+            uint16_t length = controller_get_interface()->get_acl_data_size_ble();
+            p_acl_cb->data_length_params.rx_len = length;
+            p_acl_cb->data_length_params.tx_len = length;
+        }
+        (*p_data->ble_set_data_length.p_set_pkt_data_cback)(status, &p_acl_cb->data_length_params);
+    }
+
 }
 
 /*******************************************************************************
@@ -5630,7 +5653,8 @@ void btm_dm_start_gatt_discovery (BD_ADDR bd_addr)
         bta_sys_stop_timer(&bta_dm_search_cb.gatt_close_timer);
         btm_dm_start_disc_gatt_services(bta_dm_search_cb.conn_id);
     } else {
-        BTA_GATTC_Open(bta_dm_search_cb.client_if, bd_addr, TRUE, BTA_GATT_TRANSPORT_LE);
+        //TODO need to add addr_type in future
+        BTA_GATTC_Open(bta_dm_search_cb.client_if, bd_addr, BLE_ADDR_UNKNOWN_TYPE, TRUE, BTA_GATT_TRANSPORT_LE);
     }
 }
 #endif /* #if (GATTC_INCLUDED == TRUE) */

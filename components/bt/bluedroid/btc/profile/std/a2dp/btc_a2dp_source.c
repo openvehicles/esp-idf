@@ -17,34 +17,36 @@
  **  Name:          btc_a2dp_source.c
  **
  ******************************************************************************/
-#include "bt_target.h"
-#include "bt_trace.h"
+#include "common/bt_target.h"
+#include "common/bt_trace.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <time.h>
 #include <sys/time.h>
-#include "allocator.h"
-#include "alarm.h"
-#include "thread.h"
-#include "mutex.h"
-#include "fixed_queue.h"
-#include "a2d_api.h"
-#include "a2d_sbc.h"
-#include "bta_av_api.h"
-#include "bta_av_sbc.h"
-#include "bta_av_ci.h"
-#include "btc_manage.h"
-#include "btc_common.h"
+#include "osi/allocator.h"
+#include "osi/alarm.h"
+#include "osi/thread.h"
+#include "osi/mutex.h"
+#include "osi/fixed_queue.h"
+#include "stack/a2d_api.h"
+#include "stack/a2d_sbc.h"
+#include "bta/bta_av_api.h"
+#include "bta/bta_av_sbc.h"
+#include "bta/bta_av_ci.h"
+#include "btc/btc_manage.h"
+#include "btc/btc_common.h"
 #include "btc_av_co.h"
 #include "btc_a2dp.h"
 #include "btc_a2dp_control.h"
 #include "btc_a2dp_source.h"
 #include "btc_av.h"
-#include "btc_util.h"
+#include "btc/btc_util.h"
 #include "esp_a2dp_api.h"
 #include "sbc_encoder.h"
+#include "osi/future.h"
+#include <assert.h>
 
 #if BTC_AV_SRC_INCLUDED
 
@@ -176,6 +178,7 @@ static void btc_a2dp_source_encoder_init(void);
 
 static tBTC_A2DP_SOURCE_CB btc_aa_src_cb;
 static int btc_a2dp_source_state = BTC_A2DP_SOURCE_STATE_OFF;
+static future_t *btc_a2dp_source_future = NULL;
 static xTaskHandle  btc_aa_src_task_hdl = NULL;
 static QueueHandle_t btc_aa_src_data_queue = NULL;
 static QueueHandle_t btc_aa_src_ctrl_queue = NULL;
@@ -360,7 +363,12 @@ void btc_a2dp_source_shutdown(void)
     APPL_TRACE_EVENT("## A2DP SOURCE STOP MEDIA THREAD ##\n");
 
     // Exit thread
+    btc_a2dp_source_state = BTC_A2DP_SOURCE_STATE_SHUTTING_DOWN;
+    btc_a2dp_source_future = future_new();
+    assert(btc_a2dp_source_future);
     btc_a2dp_source_ctrl_post(BTC_MEDIA_TASK_CLEAN_UP, NULL);
+    future_await(btc_a2dp_source_future);
+    btc_a2dp_source_future = NULL;
 
     vTaskDelete(btc_aa_src_task_hdl);
     btc_aa_src_task_hdl = NULL;
@@ -528,6 +536,9 @@ void btc_a2dp_source_setup_codec(void)
  *******************************************************************************/
 BT_HDR *btc_a2dp_source_audio_readbuf(void)
 {
+    if (btc_a2dp_source_state != BTC_A2DP_SOURCE_STATE_ON){
+        return NULL;
+    }
     return fixed_queue_try_dequeue(btc_aa_src_cb.TxAaQ);
 }
 
@@ -1459,6 +1470,10 @@ static void btc_a2dp_source_handle_timer(UNUSED_ATTR void *context)
     log_tstamps_us("media task tx timer");
 
 #if (BTA_AV_INCLUDED == TRUE)
+    if (btc_a2dp_source_state != BTC_A2DP_SOURCE_STATE_ON){
+        return;
+    }
+
     if (btc_aa_src_cb.is_tx_timer == TRUE) {
         btc_a2dp_source_send_aa_frame();
     } else {
@@ -1493,7 +1508,7 @@ static void btc_a2dp_source_feeding_state_reset(void)
              btc_aa_src_cb.media_feeding.cfg.pcm.num_channel *
              BTC_MEDIA_TIME_TICK_MS) / 1000;
 
-        APPL_TRACE_WARNING("pcm bytes per tick %d",
+        APPL_TRACE_EVENT("pcm bytes per tick %d",
                            (int)btc_aa_src_cb.media_feeding_state.pcm.bytes_per_tick);
     }
 }
@@ -1608,9 +1623,6 @@ static void btc_a2dp_source_thread_init(UNUSED_ATTR void *context)
 
 static void btc_a2dp_source_thread_cleanup(UNUSED_ATTR void *context)
 {
-    /* make sure no channels are restarted while shutting down */
-    btc_a2dp_source_state = BTC_A2DP_SOURCE_STATE_SHUTTING_DOWN;
-
     btc_a2dp_control_set_datachnl_stat(FALSE);
     /* Clear media task flag */
     btc_a2dp_source_state = BTC_A2DP_SOURCE_STATE_OFF;
@@ -1618,6 +1630,8 @@ static void btc_a2dp_source_thread_cleanup(UNUSED_ATTR void *context)
     btc_a2dp_control_cleanup();
 
     fixed_queue_free(btc_aa_src_cb.TxAaQ, osi_free_func);
+
+    future_ready(btc_a2dp_source_future, NULL);
 }
 
 #endif /* BTC_AV_INCLUDED */

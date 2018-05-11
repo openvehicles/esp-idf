@@ -19,19 +19,19 @@
  *  Description:   Bluetooth AVRC implementation
  *
  *****************************************************************************/
-#include "bt_target.h"
+#include "common/bt_target.h"
 #include <string.h>
-#include "bta_api.h"
-#include "bta_av_api.h"
-#include "avrc_defs.h"
-#include "btc_common.h"
-#include "btc_util.h"
+#include "bta/bta_api.h"
+#include "bta/bta_av_api.h"
+#include "stack/avrc_defs.h"
+#include "btc/btc_common.h"
+#include "btc/btc_util.h"
 #include "btc_av.h"
 #include "btc_avrc.h"
-#include "btc_manage.h"
+#include "btc/btc_manage.h"
 #include "esp_avrc_api.h"
-#include "mutex.h"
-#include "allocator.h"
+#include "osi/mutex.h"
+#include "osi/allocator.h"
 
 #if BTC_AV_INCLUDED
 
@@ -168,7 +168,7 @@ static void handle_rc_connect (tBTA_AV_RC_OPEN *p_rc_open)
         param.conn_stat.connected = true;
         memcpy(param.conn_stat.remote_bda, &rc_addr, sizeof(esp_bd_addr_t));
         btc_avrc_ct_cb_to_app(ESP_AVRC_CT_CONNECTION_STATE_EVT, &param);
-        
+
         /* on locally initiated connection we will get remote features as part of connect */
         if (p_rc_open->sdp_disc_done == TRUE) {
             handle_rc_features();
@@ -201,7 +201,7 @@ static void handle_rc_disconnect (tBTA_AV_RC_CLOSE *p_rc_close)
 
     btc_rc_vb.rc_handle = 0;
     btc_rc_vb.rc_connected = FALSE;
-    memset(btc_rc_vb.rc_addr, 0, sizeof(BD_ADDR));
+    memcpy(btc_rc_vb.rc_addr, p_rc_close->peer_addr, sizeof(BD_ADDR));
     memset(btc_rc_vb.rc_notif, 0, sizeof(btc_rc_vb.rc_notif));
 
     btc_rc_vb.rc_features = 0;
