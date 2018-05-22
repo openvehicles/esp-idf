@@ -29,6 +29,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define __XTENSA_API_H__
 
 #include <xtensa/hal.h>
+#include <esp_types.h>
 
 #include "xtensa_context.h"
 
