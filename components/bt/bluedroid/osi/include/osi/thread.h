@@ -15,6 +15,7 @@
 #ifndef __THREAD_H__
 #define __THREAD_H__
 
+#include <stdbool.h>
 #include "freertos/xtensa_api.h"
 #include "freertos/FreeRTOSConfig.h"
 #include "freertos/FreeRTOS.h"
