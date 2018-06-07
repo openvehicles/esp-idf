@@ -454,7 +454,8 @@ static int vfs_fat_stat(void* ctx, const char * path, struct stat * st)
         .tm_year = fdate.year + 80,
         .tm_sec = ftime.sec * 2,
         .tm_min = ftime.min,
-        .tm_hour = ftime.hour
+        .tm_hour = ftime.hour,
+        .tm_isdst = -1
     };
     st->st_mtime = mktime(&tm);
     st->st_atime = 0;
