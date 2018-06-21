@@ -228,6 +228,7 @@ esp_err_t IRAM_ATTR spi_flash_erase_range(uint32_t start_addr, uint32_t size)
                 COUNTER_ADD_BYTES(erase, SPI_FLASH_SEC_SIZE);
             }
             spi_flash_guard_end();
+            vTaskDelay(1); // OVMS kludge to give other tasks a chance
         }
     }
     COUNTER_STOP(erase);
