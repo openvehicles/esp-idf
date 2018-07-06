@@ -55,8 +55,9 @@
 
 #define BTM_BLE_ENC_MASK    0x03
 
-#define BTM_BLE_DUPLICATE_ENABLE        1
 #define BTM_BLE_DUPLICATE_DISABLE       0
+#define BTM_BLE_DUPLICATE_ENABLE        1
+#define BTM_BLE_DUPLICATE_MAX           BTM_BLE_DUPLICATE_ENABLE
 
 #define BTM_BLE_GAP_DISC_SCAN_INT      18         /* Interval(scan_int) = 11.25 ms= 0x0010 * 0.625 ms */
 #define BTM_BLE_GAP_DISC_SCAN_WIN      18         /* scan_window = 11.25 ms= 0x0010 * 0.625 ms */
@@ -480,6 +481,7 @@ void btm_ble_adv_filter_cleanup(void);
 BOOLEAN btm_ble_topology_check(tBTM_BLE_STATE_MASK request);
 BOOLEAN btm_ble_clear_topology_mask(tBTM_BLE_STATE_MASK request_state);
 BOOLEAN btm_ble_set_topology_mask(tBTM_BLE_STATE_MASK request_state);
+tBTM_BLE_STATE_MASK btm_ble_get_topology_mask(void);
 
 #if BTM_BLE_CONFORMANCE_TESTING == TRUE
 void btm_ble_set_no_disc_if_pair_fail (BOOLEAN disble_disc);

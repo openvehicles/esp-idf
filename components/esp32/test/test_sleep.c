@@ -14,6 +14,8 @@
 #include "soc/rtc.h"            // for wakeup trigger defines
 #include "soc/rtc_cntl_reg.h"   // for read rtc registers directly (cause)
 #include "soc/soc.h"            // for direct register read macros
+#include "rom/rtc.h"
+#include "esp_newlib.h"
 
 #define ESP_EXT0_WAKEUP_LEVEL_LOW 0
 #define ESP_EXT0_WAKEUP_LEVEL_HIGH 1
@@ -91,6 +93,35 @@ TEST_CASE("light sleep stress test", "[deepsleep]")
     vSemaphoreDelete(done);
 }
 
+TEST_CASE("light sleep stress test with periodic esp_timer", "[deepsleep]")
+{
+    void timer_func(void* arg)
+    {
+        ets_delay_us(50);
+    }
+
+    SemaphoreHandle_t done = xSemaphoreCreateCounting(2, 0);
+    esp_sleep_enable_timer_wakeup(1000);
+    esp_timer_handle_t timer;
+    esp_timer_create_args_t config = {
+            .callback = &timer_func,
+    };
+    TEST_ESP_OK(esp_timer_create(&config, &timer));
+    esp_timer_start_periodic(timer, 500);
+    xTaskCreatePinnedToCore(&test_light_sleep, "ls1", 4096, done, UNITY_FREERTOS_PRIORITY + 1, NULL, 0);
+#if portNUM_PROCESSORS == 2
+    xTaskCreatePinnedToCore(&test_light_sleep, "ls1", 4096, done, UNITY_FREERTOS_PRIORITY + 1, NULL, 1);
+#endif
+    xSemaphoreTake(done, portMAX_DELAY);
+#if portNUM_PROCESSORS == 2
+    xSemaphoreTake(done, portMAX_DELAY);
+#endif
+    vSemaphoreDelete(done);
+    esp_timer_stop(timer);
+    esp_timer_delete(timer);
+}
+
+
 #ifdef CONFIG_ESP32_RTC_CLOCK_SOURCE_EXTERNAL_CRYSTAL
 #define MAX_SLEEP_TIME_ERROR_US 200
 #else
@@ -98,7 +129,7 @@ TEST_CASE("light sleep stress test", "[deepsleep]")
 #endif
 
 
-TEST_CASE("light sleep duration is correct", "[deepsleep]")
+TEST_CASE("light sleep duration is correct", "[deepsleep][ignore]")
 {
     // don't power down XTAL — powering it up takes different time on
     // different boards
@@ -309,3 +340,35 @@ TEST_CASE("disable source trigger behavior", "[deepsleep]")
     TEST_ASSERT(err_code == ESP_ERR_INVALID_STATE);
 }
 
+static RTC_DATA_ATTR struct timeval start;
+static void trigger_deepsleep(void)
+{
+    printf("Trigger deep sleep. Waiting 30 sec ...\n");
+
+    // Simulate the dispersion of the calibration coefficients at start-up.
+    // Corrupt the calibration factor.
+    esp_clk_slowclk_cal_set(esp_clk_slowclk_cal_get() - 1000000);
+    esp_set_time_from_rtc();
+
+    // Delay for time error accumulation.
+    vTaskDelay(30000/portTICK_RATE_MS);
+
+    // Save start time. Deep sleep.
+    gettimeofday(&start, NULL);
+    esp_sleep_enable_timer_wakeup(1000);
+    esp_deep_sleep_start();
+}
+
+static void check_time_deepsleep(void)
+{
+    struct timeval stop;
+    RESET_REASON reason = rtc_get_reset_reason(0);
+    TEST_ASSERT(reason == DEEPSLEEP_RESET);
+    gettimeofday(&stop, NULL);
+    // Time dt_ms must in any case be positive.
+    int dt_ms = (stop.tv_sec - start.tv_sec) * 1000 + (stop.tv_usec - start.tv_usec) / 1000;
+    printf("delta time = %d \n", dt_ms);
+    TEST_ASSERT_MESSAGE(dt_ms > 0, "Time in deep sleep is negative");
+}
+
+TEST_CASE_MULTIPLE_STAGES("check a time after wakeup from deep sleep", "[deepsleep][reset=DEEPSLEEP_RESET]", trigger_deepsleep, check_time_deepsleep);

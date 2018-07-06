@@ -143,7 +143,7 @@ task_post_status_t hci_host_task_post(task_post_t timeout)
     evt.par = 0;
 
     if (xQueueSend(xHciHostQueue, &evt, timeout) != pdTRUE) {
-        LOG_ERROR("xHciHostQueue failed\n");
+        HCI_TRACE_ERROR("xHciHostQueue failed\n");
         return TASK_POST_FAIL;
     }
 
@@ -162,7 +162,7 @@ static int hci_layer_init_env(void)
     if (hci_host_env.command_queue) {
         fixed_queue_register_dequeue(hci_host_env.command_queue, event_command_ready);
     } else {
-        LOG_ERROR("%s unable to create pending command queue.", __func__);
+        HCI_TRACE_ERROR("%s unable to create pending command queue.", __func__);
         return -1;
     }
 
@@ -170,7 +170,7 @@ static int hci_layer_init_env(void)
     if (hci_host_env.packet_queue) {
         fixed_queue_register_dequeue(hci_host_env.packet_queue, event_packet_ready);
     } else {
-        LOG_ERROR("%s unable to create pending packet queue.", __func__);
+        HCI_TRACE_ERROR("%s unable to create pending packet queue.", __func__);
         return -1;
     }
 
@@ -179,13 +179,13 @@ static int hci_layer_init_env(void)
     cmd_wait_q->timer_is_set = false;
     cmd_wait_q->commands_pending_response = list_new(NULL);
     if (!cmd_wait_q->commands_pending_response) {
-        LOG_ERROR("%s unable to create list for commands pending response.", __func__);
+        HCI_TRACE_ERROR("%s unable to create list for commands pending response.", __func__);
         return -1;
     }
     osi_mutex_new(&cmd_wait_q->commands_pending_response_lock);
     cmd_wait_q->command_response_timer = osi_alarm_new("cmd_rsp_to", command_timed_out, cmd_wait_q, COMMAND_PENDING_TIMEOUT);
     if (!cmd_wait_q->command_response_timer) {
-        LOG_ERROR("%s unable to create command response timer.", __func__);
+        HCI_TRACE_ERROR("%s unable to create command response timer.", __func__);
         return -1;
     }
 
@@ -255,7 +255,7 @@ static void transmit_command(
     uint8_t *stream;
     waiting_command_t *wait_entry = osi_calloc(sizeof(waiting_command_t));
     if (!wait_entry) {
-        LOG_ERROR("%s couldn't allocate space for wait entry.", __func__);
+        HCI_TRACE_ERROR("%s couldn't allocate space for wait entry.", __func__);
         return;
     }
 
@@ -269,11 +269,12 @@ static void transmit_command(
     // Store the command message type in the event field
     // in case the upper layer didn't already
     command->event = MSG_STACK_TO_HC_HCI_CMD;
-    LOG_DEBUG("HCI Enqueue Comamnd opcode=0x%x\n", wait_entry->opcode);
+    HCI_TRACE_DEBUG("HCI Enqueue Comamnd opcode=0x%x\n", wait_entry->opcode);
     BTTRC_DUMP_BUFFER(NULL, command->data + command->offset, command->len);
 
     fixed_queue_enqueue(hci_host_env.command_queue, wait_entry);
     hci_host_task_post(TASK_POST_BLOCKING);
+
 }
 
 static future_t *transmit_command_futured(BT_HDR *command)
@@ -301,7 +302,7 @@ static void transmit_downward(uint16_t type, void *data)
 {
     if (type == MSG_STACK_TO_HC_HCI_CMD) {
         transmit_command((BT_HDR *)data, NULL, NULL, NULL);
-        LOG_WARN("%s legacy transmit of command. Use transmit_command instead.\n", __func__);
+        HCI_TRACE_WARNING("%s legacy transmit of command. Use transmit_command instead.\n", __func__);
     } else {
         fixed_queue_enqueue(hci_host_env.packet_queue, data);
     }
@@ -317,8 +318,14 @@ static void event_command_ready(fixed_queue_t *queue)
     command_waiting_response_t *cmd_wait_q = &hci_host_env.cmd_waiting_q;
 
     wait_entry = fixed_queue_dequeue(queue);
-    hci_host_env.command_credits--;
 
+    if(wait_entry->opcode == HCI_HOST_NUM_PACKETS_DONE){
+        packet_fragmenter->fragment_and_dispatch(wait_entry->command);
+        buffer_allocator->free(wait_entry->command);
+        osi_free(wait_entry);
+        return;
+    }
+    hci_host_env.command_credits--;
     // Move it to the list of commands awaiting response
     osi_mutex_lock(&cmd_wait_q->commands_pending_response_lock, OSI_MUTEX_MAX_TIMEOUT);
     list_append(cmd_wait_q->commands_pending_response, wait_entry);
@@ -398,12 +405,12 @@ static void command_timed_out(void *context)
     osi_mutex_unlock(&cmd_wait_q->commands_pending_response_lock);
 
     if (wait_entry == NULL) {
-        LOG_ERROR("%s with no commands pending response", __func__);
+        HCI_TRACE_ERROR("%s with no commands pending response", __func__);
     } else
         // We shouldn't try to recover the stack from this command timeout.
         // If it's caused by a software bug, fix it. If it's a hardware bug, fix it.
     {
-        LOG_ERROR("%s hci layer timeout waiting for response to a command. opcode: 0x%x", __func__, wait_entry->opcode);
+        HCI_TRACE_ERROR("%s hci layer timeout waiting for response to a command. opcode: 0x%x", __func__, wait_entry->opcode);
     }
 }
 
@@ -430,15 +437,14 @@ static bool filter_incoming_event(BT_HDR *packet)
     STREAM_TO_UINT8(event_code, stream);
     STREAM_SKIP_UINT8(stream); // Skip the parameter total length field
 
-    LOG_DEBUG("Receive packet event_code=0x%x\n", event_code);
+    HCI_TRACE_DEBUG("Receive packet event_code=0x%x\n", event_code);
 
     if (event_code == HCI_COMMAND_COMPLETE_EVT) {
         STREAM_TO_UINT8(hci_host_env.command_credits, stream);
         STREAM_TO_UINT16(opcode, stream);
-
         wait_entry = get_waiting_command(opcode);
         if (!wait_entry) {
-            LOG_WARN("%s command complete event with no matching command. opcode: 0x%x.", __func__, opcode);
+            HCI_TRACE_WARNING("%s command complete event with no matching command. opcode: 0x%x.", __func__, opcode);
         } else if (wait_entry->complete_callback) {
             wait_entry->complete_callback(packet, wait_entry->context);
         } else if (wait_entry->complete_future) {
@@ -456,7 +462,7 @@ static bool filter_incoming_event(BT_HDR *packet)
 
         wait_entry = get_waiting_command(opcode);
         if (!wait_entry) {
-            LOG_WARN("%s command status event with no matching command. opcode: 0x%x", __func__, opcode);
+            HCI_TRACE_WARNING("%s command status event with no matching command. opcode: 0x%x", __func__, opcode);
         } else if (wait_entry->status_callback) {
             wait_entry->status_callback(status, wait_entry->command, wait_entry->context);
         }
@@ -516,7 +522,7 @@ static serial_data_type_t event_to_data_type(uint16_t event)
     } else if (event == MSG_STACK_TO_HC_HCI_CMD) {
         return DATA_TYPE_COMMAND;
     } else {
-        LOG_ERROR("%s invalid event type, could not translate 0x%x\n", __func__, event);
+        HCI_TRACE_ERROR("%s invalid event type, could not translate 0x%x\n", __func__, event);
     }
 
     return 0;

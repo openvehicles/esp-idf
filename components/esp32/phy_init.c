@@ -38,6 +38,7 @@
 #include "phy_init_data.h"
 #include "coexist_internal.h"
 #include "driver/periph_ctrl.h"
+#include "esp_wifi_internal.h"
 
 
 static const char* TAG = "phy_init";
@@ -119,7 +120,23 @@ esp_err_t esp_phy_rf_init(const esp_phy_init_data_t* init_data, esp_phy_calibrat
             // Enable WiFi/BT common peripheral clock
             periph_module_enable(PERIPH_WIFI_BT_COMMON_MODULE);
             phy_set_wifi_mode_only(0);
-            register_chipv7_phy(init_data, calibration_data, mode);
+
+            if (ESP_CAL_DATA_CHECK_FAIL == register_chipv7_phy(init_data, calibration_data, mode)) {
+                ESP_LOGW(TAG, "saving new calibration data because of checksum failure, mode(%d)", mode);
+#ifdef CONFIG_ESP32_PHY_CALIBRATION_AND_DATA_STORAGE
+                if (mode != PHY_RF_CAL_FULL) {
+                    esp_phy_store_cal_data_to_nvs(calibration_data);
+                }
+#endif
+            }
+
+extern esp_err_t wifi_osi_funcs_register(wifi_osi_funcs_t *osi_funcs);
+            status = wifi_osi_funcs_register(&g_wifi_osi_funcs);
+            if(status != ESP_OK) {
+                ESP_LOGE(TAG, "failed to register wifi os adapter, ret(%d)", status);
+                _lock_release(&s_phy_rf_init_lock);
+                return ESP_FAIL;
+            }
             coex_bt_high_prio();
         }
     }
@@ -531,6 +548,7 @@ void esp_phy_load_cal_and_init(phy_rf_module_t module)
 
 #ifdef CONFIG_ESP32_PHY_CALIBRATION_AND_DATA_STORAGE
     esp_phy_calibration_mode_t calibration_mode = PHY_RF_CAL_PARTIAL;
+    uint8_t sta_mac[6];
     if (rtc_get_reset_reason(0) == DEEPSLEEP_RESET) {
         calibration_mode = PHY_RF_CAL_NONE;
     }
@@ -540,6 +558,8 @@ void esp_phy_load_cal_and_init(phy_rf_module_t module)
         calibration_mode = PHY_RF_CAL_FULL;
     }
 
+    esp_efuse_mac_get_default(sta_mac);
+    memcpy(cal_data->mac, sta_mac, 6);
     esp_phy_rf_init(init_data, calibration_mode, cal_data, module);
 
     if (calibration_mode != PHY_RF_CAL_NONE && err != ESP_OK) {

@@ -165,6 +165,20 @@ How it renders:
 
 A check is added to the CI build script, which searches RST files for presence of hard-coded links (identified by tree/master, blob/master, or raw/master part of the URL). This check can be run manually: ``cd docs`` and then ``make gh-linkcheck``.
 
+
+Linking Language Versions
+-------------------------
+
+Switching between documentation in different languages may be done using ``:link_to_translation:`` custom role. The role placed on a page of documentation provides a link to the same page in a language specified as a parameter. Examples below show how to enter links to Chinese and English versions of documentation::
+
+    :link_to_translation:`zh_CN:中文版`
+    :link_to_translation:`en:English`
+
+The language is specified using standard abbreviations like ``en`` or ``zh_CN``. The text after last semicolon is not standardized and may be entered depending on the context where the link is placed, e.g.::
+
+    :link_to_translation:`en:see description in English`
+
+
 .. _add-illustrations:
 
 Add Illustrations
@@ -233,7 +247,7 @@ You can setup environment to build documentation locally on your PC by installin
 5. Blockdiag - http://blockdiag.com/en/index.html
 6. Recommonmark - https://github.com/rtfd/recommonmark
 
-The package "sphinx_rtd_theme" is added to have the same "look and feel" of `ESP32 Programming Guide <https://esp-idf.readthedocs.io/en/latest/index.html>`_ documentation like on the "Read the Docs" hosting site.
+The package "sphinx_rtd_theme" is added to have the same "look and feel" of `ESP32 Programming Guide <https://docs.espressif.com/projects/esp-idf/en/latest/index.html>`_ documentation like on the "Read the Docs" hosting site.
 
 Do not worry about being confronted with several packages to install. Besides Doxygen, all remaining packages are written in Python. Therefore installation of all of them is combined into one simple step.
 

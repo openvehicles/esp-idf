@@ -24,6 +24,7 @@
 #include "rom/gpio.h"
 #include "esp_attr.h"
 #include "esp_intr_alloc.h"
+#include "soc/gpio_periph.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -31,11 +32,11 @@ extern "C" {
 
 #define GPIO_SEL_0              (BIT(0))                         /*!< Pin 0 selected */
 #define GPIO_SEL_1              (BIT(1))                         /*!< Pin 1 selected */
-#define GPIO_SEL_2              (BIT(2))                         /*!< Pin 2 selected 
+#define GPIO_SEL_2              (BIT(2))                         /*!< Pin 2 selected
                                                                       @note There are more macros
                                                                       like that up to pin 39,
                                                                       excluding pins 20, 24 and 28..31.
-                                                                      They are not shown here 
+                                                                      They are not shown here
                                                                       to reduce redundant information. */
 /** @cond */
 #define GPIO_SEL_3              (BIT(3))                         /*!< Pin 3 selected */
@@ -121,10 +122,8 @@ extern "C" {
 #define GPIO_MODE_DEF_OD              (BIT2)
 
 
-#define GPIO_PIN_COUNT              40
 /** @endcond */
 
-extern const uint32_t GPIO_PIN_MUX_REG[GPIO_PIN_COUNT];
 #define GPIO_IS_VALID_GPIO(gpio_num)      ((gpio_num < GPIO_PIN_COUNT && GPIO_PIN_MUX_REG[gpio_num] != 0))   /*!< Check whether it is a valid GPIO number */
 #define GPIO_IS_VALID_OUTPUT_GPIO(gpio_num)      ((GPIO_IS_VALID_GPIO(gpio_num)) && (gpio_num < 34))         /*!< Check whether it can be a valid GPIO number of output mode */
 
@@ -172,7 +171,7 @@ typedef enum {
     GPIO_NUM_38 = 38,   /*!< GPIO38, input mode only */
     GPIO_NUM_39 = 39,   /*!< GPIO39, input mode only */
     GPIO_NUM_MAX = 40,
-/** @endcond */    
+/** @endcond */
 } gpio_num_t;
 
 typedef enum {
@@ -248,6 +247,18 @@ typedef intr_handle_t gpio_isr_handle_t;
  */
 esp_err_t gpio_config(const gpio_config_t *pGPIOConfig);
 
+/**
+ * @brief Reset an gpio to default state (select gpio function, enable pullup and disable input and output).
+ * 
+ * @param gpio_num GPIO number.
+ * 
+ * @note This function also configures the IOMUX for this pin to the GPIO
+ *       function, and disconnects any other peripheral output configured via GPIO
+ *       Matrix.
+ * 
+ * @return Always return ESP_OK.
+ */
+esp_err_t gpio_reset_pin(gpio_num_t gpio_num);
 
 /**
  * @brief  GPIO set interrupt trigger type
@@ -264,6 +275,10 @@ esp_err_t gpio_set_intr_type(gpio_num_t gpio_num, gpio_int_type_t intr_type);
 
 /**
  * @brief  Enable GPIO module interrupt signal
+ *
+ * @note Please do not use the interrupt of GPIO36 and GPIO39 when using ADC.
+ *       Please refer to the comments of `adc1_get_raw`.
+ *       Please refer to section 3.11 of 'ECO_and_Workarounds_for_Bugs_in_ESP32' for the description of this issue.
  *
  * @param  gpio_num GPIO number. If you want to enable an interrupt on e.g. GPIO16, gpio_num should be GPIO_NUM_16 (16);
  *
@@ -549,6 +564,22 @@ esp_err_t gpio_hold_en(gpio_num_t gpio_num);
   *     - ESP_ERR_NOT_SUPPORTED Not support pad hold function
   */
  esp_err_t gpio_hold_dis(gpio_num_t gpio_num);
+
+/**
+  * @brief Set pad input to a peripheral signal through the IOMUX.
+  * @param gpio_num GPIO number of the pad.
+  * @param signal_idx Peripheral signal id to input. One of the ``*_IN_IDX`` signals in ``soc/gpio_sig_map.h``.
+  */
+void gpio_iomux_in(uint32_t gpio_num, uint32_t signal_idx);
+
+/**
+  * @brief Set peripheral output to an GPIO pad through the IOMUX.
+  * @param gpio_num gpio_num GPIO number of the pad.
+  * @param func The function number of the peripheral pin to output pin.
+  *        One of the ``FUNC_X_*`` of specified pin (X) in ``soc/io_mux_reg.h``.
+  * @param oen_inv True if the output enable needs to be inversed, otherwise False.
+  */
+void gpio_iomux_out(uint8_t gpio_num, int func, bool oen_inv);
 
 #ifdef __cplusplus
 }

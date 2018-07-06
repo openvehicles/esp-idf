@@ -37,6 +37,16 @@ config LWIP_MAX_SOCKETS
         the maximum amount of sockets here. The valid value is from 1
         to 16.
 
+config USE_ONLY_LWIP_SELECT
+    bool "Support LWIP socket select() only"
+    default n
+    help
+        The virtual filesystem layer of select() redirects sockets to
+        lwip_select() and non-socket file descriptors to their respective driver
+        implementations. If this option is enabled then all calls of select()
+        will be redirected to lwip_select(), therefore, select can be used
+        for sockets only.
+
 config LWIP_SO_REUSE
     bool "Enable SO_REUSEADDR option"
     default y
@@ -318,6 +328,16 @@ config TCP_QUEUE_OOSEQ
 
         Disable this option to save some RAM during TCP sessions, at the expense
         of increased retransmissions if segments arrive out of order.
+
+config ESP_TCP_KEEP_CONNECTION_WHEN_IP_CHANGES
+    bool "Keep TCP connections when IP changed"
+    default n
+    help
+        This option is enabled when the following scenario happen:
+        network dropped and reconnected, IP changes is like: 192.168.0.2->0.0.0.0->192.168.0.2
+        
+        Disable this option to keep consistent with the original LWIP code behavior.
+
 
 choice TCP_OVERSIZE
     prompt "Pre-allocate transmit PBUF size"

@@ -45,6 +45,16 @@ static BT_HDR *make_read_buffer_size(void)
     return make_command_no_params(HCI_READ_BUFFER_SIZE);
 }
 
+static BT_HDR *make_set_c2h_flow_control(uint8_t enable)
+{
+    uint8_t *stream;
+    const uint8_t parameter_size = 1;
+    BT_HDR *packet = make_command(HCI_SET_HC_TO_HOST_FLOW_CTRL, parameter_size, &stream);
+
+    UINT8_TO_STREAM(stream, enable);
+    return packet;
+}
+
 static BT_HDR *make_host_buffer_size(uint16_t acl_size, uint8_t sco_size, uint16_t acl_count, uint16_t sco_count)
 {
     uint8_t *stream;
@@ -175,6 +185,15 @@ static BT_HDR *make_ble_set_event_mask(const bt_event_mask_t *event_mask)
     return packet;
 }
 
+static BT_HDR *make_write_sync_flow_control_enable(uint8_t enable)
+{
+    uint8_t *stream;
+    const uint8_t parameter_size = 1;
+    BT_HDR *packet = make_command(HCI_WRITE_SCO_FLOW_CTRL_ENABLE, parameter_size, &stream);
+
+    UINT8_TO_STREAM(stream, enable);
+    return packet;
+}
 // Internal functions
 
 static BT_HDR *make_command_no_params(uint16_t opcode)
@@ -211,6 +230,7 @@ static BT_HDR *make_packet(size_t data_size)
 static const hci_packet_factory_t interface = {
     make_reset,
     make_read_buffer_size,
+    make_set_c2h_flow_control,
     make_host_buffer_size,
     make_read_local_version_info,
     make_read_bd_addr,
@@ -227,7 +247,8 @@ static const hci_packet_factory_t interface = {
     make_ble_read_resolving_list_size,
     make_ble_read_suggested_default_data_length,
     make_ble_write_suggested_default_data_length,
-    make_ble_set_event_mask
+    make_ble_set_event_mask,
+    make_write_sync_flow_control_enable
 };
 
 const hci_packet_factory_t *hci_packet_factory_get_interface()

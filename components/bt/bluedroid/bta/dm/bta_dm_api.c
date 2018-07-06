@@ -166,7 +166,7 @@ void BTA_DisableTestMode(void)
 ** Returns          void
 **
 *******************************************************************************/
-void BTA_DmSetDeviceName(char *p_name)
+void BTA_DmSetDeviceName(const char *p_name)
 {
 
     tBTA_DM_API_SET_NAME    *p_msg;
@@ -206,12 +206,13 @@ void BTA_DmBleReadAdvTxPower(tBTA_CMPL_CB *cmpl_cb)
     }
 }
 
-void BTA_DmBleReadRSSI(BD_ADDR remote_addr, tBTA_CMPL_CB *cmpl_cb)
+void BTA_DmBleReadRSSI(BD_ADDR remote_addr, tBTA_TRANSPORT transport, tBTA_CMPL_CB *cmpl_cb)
 {
     tBTA_DM_API_READ_RSSI *p_msg;
     if ((p_msg = (tBTA_DM_API_READ_RSSI *)osi_malloc(sizeof(tBTA_DM_API_READ_RSSI))) != NULL) {
         p_msg->hdr.event = BTA_DM_API_BLE_READ_RSSI_EVT;
         memcpy(p_msg->remote_addr, remote_addr, sizeof(BD_ADDR));
+        p_msg->transport = transport;
         p_msg->read_rssi_cb = cmpl_cb;
         bta_sys_sendmsg(p_msg);
     }
@@ -569,7 +570,7 @@ void BTA_DmAddDevice(BD_ADDR bd_addr, DEV_CLASS dev_class, LINK_KEY link_key,
 ** Returns          void
 **
 *******************************************************************************/
-tBTA_STATUS BTA_DmRemoveDevice(BD_ADDR bd_addr)
+tBTA_STATUS BTA_DmRemoveDevice(BD_ADDR bd_addr, tBT_TRANSPORT transport)
 {
     tBTA_DM_API_REMOVE_DEVICE *p_msg;
 
@@ -578,6 +579,7 @@ tBTA_STATUS BTA_DmRemoveDevice(BD_ADDR bd_addr)
 
         p_msg->hdr.event = BTA_DM_API_REMOVE_DEVICE_EVT;
         bdcpy(p_msg->bd_addr, bd_addr);
+        p_msg->transport = transport;
         bta_sys_sendmsg(p_msg);
     } else {
         return BTA_FAILURE;
@@ -968,6 +970,7 @@ void BTA_DmSetBleScanParams(tGATT_IF client_if, UINT32 scan_interval,
 **                  scan_interval - scan interval
 **                  scan_window - scan window
 **                  scan_mode - scan mode
+**                  scan_duplicate_filter - scan duplicate filter
 **                  scan_param_setup_status_cback - Set scan param status callback
 **
 ** Returns          void
@@ -975,7 +978,7 @@ void BTA_DmSetBleScanParams(tGATT_IF client_if, UINT32 scan_interval,
 *******************************************************************************/
 void BTA_DmSetBleScanFilterParams(tGATT_IF client_if, UINT32 scan_interval,
                                   UINT32 scan_window, tBLE_SCAN_MODE scan_mode, UINT8 scan_fil_poilcy,
-                                  UINT8 addr_type_own, tBLE_SCAN_PARAM_SETUP_CBACK scan_param_setup_cback)
+                                  UINT8 addr_type_own, UINT8 scan_duplicate_filter, tBLE_SCAN_PARAM_SETUP_CBACK scan_param_setup_cback)
 {
     tBTA_DM_API_BLE_SCAN_FILTER_PARAMS *p_msg;
 
@@ -987,6 +990,7 @@ void BTA_DmSetBleScanFilterParams(tGATT_IF client_if, UINT32 scan_interval,
         p_msg->scan_window = scan_window;
         p_msg->scan_mode = scan_mode;
         p_msg->addr_type_own = addr_type_own;
+        p_msg->scan_duplicate_filter = scan_duplicate_filter;
         p_msg->scan_filter_policy = scan_fil_poilcy;
         p_msg->scan_param_setup_cback = scan_param_setup_cback;
 

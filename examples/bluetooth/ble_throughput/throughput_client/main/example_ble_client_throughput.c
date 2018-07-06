@@ -91,7 +91,8 @@ static esp_ble_scan_params_t ble_scan_params = {
     .own_addr_type          = BLE_ADDR_TYPE_PUBLIC,
     .scan_filter_policy     = BLE_SCAN_FILTER_ALLOW_ALL,
     .scan_interval          = 0x50,
-    .scan_window            = 0x30
+    .scan_window            = 0x30,
+    .scan_duplicate         = BLE_SCAN_DUPLICATE_DISABLE
 };
 
 struct gattc_profile_inst {
@@ -481,14 +482,16 @@ static void throughput_client_task(void *param)
     while(1) {
 #if (CONFIG_GATTS_NOTIFY_THROUGHPUT)
         vTaskDelay(2000 / portTICK_PERIOD_MS);
-        uint32_t bit_rate = 0;
-        if (start_time) {
-            current_time = esp_timer_get_time();
-            bit_rate = notify_len * SECOND_TO_USECOND / (current_time - start_time);
-            ESP_LOGI(GATTC_TAG, "Notify Bit rate = %d Btye/s, = %d bit/s, time = %ds", 
-                     bit_rate, bit_rate<<3, (int)((current_time - start_time) / SECOND_TO_USECOND));
-        } else {
-            ESP_LOGI(GATTC_TAG, "Notify Bit rate = 0 Btye/s, = 0 bit/s");
+        if(is_connecet){
+            uint32_t bit_rate = 0;
+            if (start_time) {
+                current_time = esp_timer_get_time();
+                bit_rate = notify_len * SECOND_TO_USECOND / (current_time - start_time);
+                ESP_LOGI(GATTC_TAG, "Notify Bit rate = %d Btye/s, = %d bit/s, time = %ds", 
+                        bit_rate, bit_rate<<3, (int)((current_time - start_time) / SECOND_TO_USECOND));
+            } else {
+                ESP_LOGI(GATTC_TAG, "Notify Bit rate = 0 Btye/s, = 0 bit/s");
+            }
         }
 #endif /* #if (CONFIG_GATTS_NOTIFY_THROUGHPUT) */
 #if (CONFIG_GATTC_WRITE_THROUGHPUT)        

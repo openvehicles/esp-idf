@@ -520,6 +520,14 @@ config ESP32_DEBUG_OCDAWARE
         The FreeRTOS panic and unhandled exception handers can detect a JTAG OCD debugger and
         instead of panicking, have the debugger stop on the offending instruction.
 
+config ESP32_DEBUG_STUBS_ENABLE
+    bool "OpenOCD debug stubs"
+    default OPTIMIZATION_LEVEL_DEBUG    
+    depends on !ESP32_TRAX
+    help
+        Debug stubs are used by OpenOCD to execute pre-compiled onboard code which does some useful debugging, 
+        e.g. GCOV data dump.
+
 config INT_WDT
     bool "Interrupt watchdog"
     default y
@@ -692,7 +700,8 @@ endchoice
 
 config ESP32_RTC_CLK_CAL_CYCLES
     int "Number of cycles for RTC_SLOW_CLK calibration"
-    default 1024
+    default 3000 if ESP32_RTC_CLOCK_SOURCE_EXTERNAL_CRYSTAL
+    default 1024 if ESP32_RTC_CLOCK_SOURCE_INTERNAL_RC
     range 0 125000
     help
         When the startup code initializes RTC_SLOW_CLK, it can perform
@@ -705,18 +714,27 @@ config ESP32_RTC_CLK_CAL_CYCLES
         When this option is set to 0, clock calibration will not be performed at
         startup, and approximate clock frequencies will be assumed:
 
-        - 150000 Hz if internal RC oscillator is used as clock source
-        - 32768 Hz if the 32k crystal oscillator is used
+        - 150000 Hz if internal RC oscillator is used as clock source. For this use value 1024.
+        - 32768 Hz if the 32k crystal oscillator is used. For this use value 3000 or more.
+          In case more value will help improve the definition of the launch of the crystal.
+          If the crystal could not start, it will be switched to internal RC.
 
 config ESP32_RTC_XTAL_BOOTSTRAP_CYCLES
     int "Bootstrap cycles for external 32kHz crystal"
-    default 100
+    depends on ESP32_RTC_CLOCK_SOURCE_EXTERNAL_CRYSTAL
+    default 5
     range 0 32768
     help
         To reduce the startup time of an external RTC crystal, 
         we bootstrap it with a 32kHz square wave for a fixed number of cycles. 
         Setting 0 will disable bootstrapping (if disabled, the crystal may take 
         longer to start up or fail to oscillate under some conditions).
+        
+        If this value is too high, a faulty crystal may initially start and then fail. 
+        If this value is too low, an otherwise good crystal may not start.
+        
+        To accurately determine if the crystal has started, 
+        set a larger "Number of cycles for RTC_SLOW_CLK calibration" (about 3000).
 
 config ESP32_DEEP_SLEEP_WAKEUP_DELAY
     int "Extra delay in deep sleep wake stub (in us)"
@@ -953,6 +971,14 @@ config ESP32_WIFI_DYNAMIC_TX_BUFFER_NUM
         can deliver frames faster than WiFi layer can transmit. In these cases, we may run out of TX
         buffers.
 
+config ESP32_WIFI_CSI_ENABLED
+    bool "WiFi CSI(Channel State Information)"
+    default n
+    help
+        Select this option to enable CSI(Channel State Information) feature. CSI takes about 
+        CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM KB of RAM. If CSI is not used, it is better to disable 
+        this feature in order to save memory.
+
 config ESP32_WIFI_AMPDU_TX_ENABLED
     bool "WiFi AMPDU TX"
     default y
@@ -993,6 +1019,19 @@ config ESP32_WIFI_NVS_ENABLED
     default y
     help
         Select this option to enable WiFi NVS flash
+
+choice ESP32_WIFI_TASK_CORE_ID
+    depends on !FREERTOS_UNICORE
+    prompt "WiFi Task Core ID"
+    default ESP32_WIFI_TASK_PINNED_TO_CORE_0
+    help
+        Pinned WiFi task to core 0 or core 1.
+
+config ESP32_WIFI_TASK_PINNED_TO_CORE_0
+    bool "Core 0"
+config ESP32_WIFI_TASK_PINNED_TO_CORE_1
+    bool "Core 1"
+endchoice
 
 endmenu  # Wi-Fi
 

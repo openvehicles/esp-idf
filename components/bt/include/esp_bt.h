@@ -27,7 +27,7 @@ extern "C" {
 
 /**
  * @brief Controller config options, depend on config mask.
- *        Config mask indicate which functions enabled, this means 
+ *        Config mask indicate which functions enabled, this means
  *        some options or parameters of some functions enabled by config mask.
  */
 typedef struct {
@@ -35,9 +35,19 @@ typedef struct {
     uint8_t controller_task_prio;           /*!< Bluetooth controller task priority */
     uint8_t hci_uart_no;                    /*!< If use UART1/2 as HCI IO interface, indicate UART number */
     uint32_t hci_uart_baudrate;             /*!< If use UART1/2 as HCI IO interface, indicate UART baudrate */
+    uint8_t scan_duplicate_mode;            /*!< If use UART1/2 as HCI IO interface, indicate UART baudrate */
+    uint16_t normal_adv_size;               /*!< Normal adv size for scan duplicate */
+    uint16_t mesh_adv_size;                 /*!< Mesh adv size for scan duplicate */
+    uint16_t send_adv_reserved_size;        /*!< Controller minimum memory value */
+    uint32_t  controller_debug_flag;         /*!< Controller debug log flag */
 } esp_bt_controller_config_t;
 
 #ifdef CONFIG_BT_ENABLED
+/* While scanning, if the free memory value in controller is less than SCAN_SEND_ADV_RESERVED_SIZE, 
+the adv packet will be discarded until the memory is restored. */
+#define SCAN_SEND_ADV_RESERVED_SIZE        1000
+/* enable controller log debug when adv lost */
+#define CONTROLLER_ADV_LOST_DEBUG_BIT      (0<<0)
 
 #ifdef CONFIG_BT_HCI_UART_NO
 #define BT_HCI_UART_NO_DEFAULT CONFIG_BT_HCI_UART_NO
@@ -51,12 +61,44 @@ typedef struct {
 #define BT_HCI_UART_BAUDRATE_DEFAULT 921600
 #endif /* BT_HCI_UART_BAUDRATE_DEFAULT */
 
+/* normal adv cache size */
+#ifdef CONFIG_DUPLICATE_SCAN_CACHE_SIZE
+#define NORMAL_SCAN_DUPLICATE_CACHE_SIZE  CONFIG_DUPLICATE_SCAN_CACHE_SIZE
+#else
+#define NORMAL_SCAN_DUPLICATE_CACHE_SIZE  20
+#endif
+
+#ifndef CONFIG_BLE_MESH_SCAN_DUPLICATE_EN
+#define CONFIG_BLE_MESH_SCAN_DUPLICATE_EN FALSE
+#endif
+
+#define SCAN_DUPLICATE_MODE_NORMAL_ADV_ONLY   0
+#define SCAN_DUPLICATE_MODE_NORMAL_ADV_MESH_ADV 1
+
+#if CONFIG_BLE_MESH_SCAN_DUPLICATE_EN
+    #define SCAN_DUPLICATE_MODE SCAN_DUPLICATE_MODE_NORMAL_ADV_MESH_ADV
+    #ifdef CONFIG_MESH_DUPLICATE_SCAN_CACHE_SIZE
+    #define MESH_DUPLICATE_SCAN_CACHE_SIZE  CONFIG_MESH_DUPLICATE_SCAN_CACHE_SIZE
+    #else
+    #define MESH_DUPLICATE_SCAN_CACHE_SIZE       50
+    #endif
+#else
+    #define SCAN_DUPLICATE_MODE SCAN_DUPLICATE_MODE_NORMAL_ADV_ONLY
+    #define MESH_DUPLICATE_SCAN_CACHE_SIZE        0
+#endif
+
 #define BT_CONTROLLER_INIT_CONFIG_DEFAULT() {                       \
     .controller_task_stack_size = ESP_TASK_BT_CONTROLLER_STACK,     \
     .controller_task_prio = ESP_TASK_BT_CONTROLLER_PRIO,            \
     .hci_uart_no = BT_HCI_UART_NO_DEFAULT,                          \
     .hci_uart_baudrate = BT_HCI_UART_BAUDRATE_DEFAULT,              \
+    .scan_duplicate_mode = SCAN_DUPLICATE_MODE,                     \
+    .normal_adv_size = NORMAL_SCAN_DUPLICATE_CACHE_SIZE,            \
+    .mesh_adv_size = MESH_DUPLICATE_SCAN_CACHE_SIZE,                \
+    .send_adv_reserved_size = SCAN_SEND_ADV_RESERVED_SIZE,          \
+    .controller_debug_flag = CONTROLLER_ADV_LOST_DEBUG_BIT,         \
 };
+
 #else
 #define BT_CONTROLLER_INIT_CONFIG_DEFAULT() {0}; _Static_assert(0, "please enable bluetooth in menuconfig to use bt.h");
 #endif
@@ -90,7 +132,7 @@ typedef enum {
  *        ESP_BLE_PWR_TYPE_SCAN : for scan.
  *        ESP_BLE_PWR_TYPE_DEFAULT : if each connection's TX power is not set, it will use this default value.
  *                                   if neither in scan mode nor in adv mode, it will use this default value.
- *        If none of power type is set, system will use ESP_PWR_LVL_P1 as default for ADV/SCAN/CONN0-9.
+ *        If none of power type is set, system will use ESP_PWR_LVL_P3 as default for ADV/SCAN/CONN0-9.
  */
 typedef enum {
     ESP_BLE_PWR_TYPE_CONN_HDL0  = 0,            /*!< For connection handle 0 */
@@ -112,15 +154,31 @@ typedef enum {
  * @brief Bluetooth TX power level(index), it's just a index corresponding to power(dbm).
  */
 typedef enum {
-    ESP_PWR_LVL_N14 = 0,            /*!< Corresponding to -14dbm */
-    ESP_PWR_LVL_N11 = 1,            /*!< Corresponding to -11dbm */
-    ESP_PWR_LVL_N8  = 2,            /*!< Corresponding to  -8dbm */
-    ESP_PWR_LVL_N5  = 3,            /*!< Corresponding to  -5dbm */
-    ESP_PWR_LVL_N2  = 4,            /*!< Corresponding to  -2dbm */
-    ESP_PWR_LVL_P1  = 5,            /*!< Corresponding to   1dbm */
-    ESP_PWR_LVL_P4  = 6,            /*!< Corresponding to   4dbm */
-    ESP_PWR_LVL_P7  = 7,            /*!< Corresponding to   7dbm */
+    ESP_PWR_LVL_N12 = 0,                /*!< Corresponding to -12dbm */
+    ESP_PWR_LVL_N9  = 1,                /*!< Corresponding to  -9dbm */
+    ESP_PWR_LVL_N6  = 2,                /*!< Corresponding to  -6dbm */
+    ESP_PWR_LVL_N3  = 3,                /*!< Corresponding to  -3dbm */
+    ESP_PWR_LVL_N0  = 4,                /*!< Corresponding to   0dbm */
+    ESP_PWR_LVL_P3  = 5,                /*!< Corresponding to  +3dbm */
+    ESP_PWR_LVL_P6  = 6,                /*!< Corresponding to  +6dbm */
+    ESP_PWR_LVL_P9  = 7,                /*!< Corresponding to  +9dbm */
+    ESP_PWR_LVL_N14 = ESP_PWR_LVL_N12,  /*!< Backward compatibility! Setting to -14dbm will actually result to -12dbm */
+    ESP_PWR_LVL_N11 = ESP_PWR_LVL_N9,   /*!< Backward compatibility! Setting to -11dbm will actually result to  -9dbm */
+    ESP_PWR_LVL_N8  = ESP_PWR_LVL_N6,   /*!< Backward compatibility! Setting to  -8dbm will actually result to  -6dbm */
+    ESP_PWR_LVL_N5  = ESP_PWR_LVL_N3,   /*!< Backward compatibility! Setting to  -5dbm will actually result to  -3dbm */
+    ESP_PWR_LVL_N2  = ESP_PWR_LVL_N0,   /*!< Backward compatibility! Setting to  -2dbm will actually result to   0dbm */
+    ESP_PWR_LVL_P1  = ESP_PWR_LVL_P3,   /*!< Backward compatibility! Setting to  +1dbm will actually result to  +3dbm */
+    ESP_PWR_LVL_P4  = ESP_PWR_LVL_P6,   /*!< Backward compatibility! Setting to  +4dbm will actually result to  +6dbm */
+    ESP_PWR_LVL_P7  = ESP_PWR_LVL_P9,   /*!< Backward compatibility! Setting to  +7dbm will actually result to  +9dbm */
 } esp_power_level_t;
+
+/**
+ * @brief Bluetooth audio data transport path
+ */
+typedef enum {
+    ESP_SCO_DATA_PATH_HCI = 0,            /*!< data over HCI transport */
+    ESP_SCO_DATA_PATH_PCM = 1,            /*!< data over PCM interface */
+} esp_sco_data_path_t;
 
 /**
  * @brief  Set BLE TX power
@@ -148,7 +206,7 @@ esp_power_level_t esp_ble_tx_power_get(esp_ble_power_type_t power_type);
  *         For example, if you want BR/EDR use the new TX power to do inquire, you should call
  *         this function before inquire. Another word, If call this function when BR/EDR is in inquire(ING),
  *         please do inquire again after call this function.
- *         Default minimum power level is ESP_PWR_LVL_N2, and maximum power level is ESP_PWR_LVL_P1.
+ *         Default minimum power level is ESP_PWR_LVL_N0, and maximum power level is ESP_PWR_LVL_P3.
  * @param  min_power_level: The minimum power level
  * @param  max_power_level: The maximum power level
  * @return              ESP_OK - success, other - failed
@@ -164,6 +222,13 @@ esp_err_t esp_bredr_tx_power_set(esp_power_level_t min_power_level, esp_power_le
  */
 esp_err_t esp_bredr_tx_power_get(esp_power_level_t *min_power_level, esp_power_level_t *max_power_level);
 
+/**
+ * @brief  set default SCO data path
+ *         Should be called after controller is enabled, and before (e)SCO link is established
+ * @param  data_path: SCO data path
+ * @return              ESP_OK - success, other - failed
+ */
+esp_err_t esp_bredr_sco_datapath_set(esp_sco_data_path_t data_path);
 
 /**
  * @brief  Initialize BT controller to allocate task and other resource.
@@ -234,7 +299,7 @@ void esp_vhci_host_register_callback(const esp_vhci_host_callback_t *callback);
 
 /** @brief esp_bt_controller_mem_release
  * release the memory by mode, if never use the bluetooth mode
- * it can release the .bbs, .data and other section to heap.
+ * it can release the .bss, .data and other section to heap.
  * The total size is about 70k bytes.
  *
  * esp_bt_controller_mem_release(mode) should be called only before esp_bt_controller_init()
@@ -259,6 +324,62 @@ void esp_vhci_host_register_callback(const esp_vhci_host_callback_t *callback);
  * @return ESP_OK - success, other - failed
  */
 esp_err_t esp_bt_controller_mem_release(esp_bt_mode_t mode);
+
+/**
+ * @brief enable bluetooth to enter modem sleep
+ *
+ * Note that this function shall not be invoked before esp_bt_controller_enable()
+ *
+ * There are currently two options for bluetooth modem sleep, one is ORIG mode, and another is EVED Mode. EVED Mode is intended for BLE only.
+ *
+ * For ORIG mode:
+ * Bluetooth modem sleep is enabled in controller start up by default if CONFIG_BTDM_CONTROLLER_MODEM_SLEEP is set and "ORIG mode" is selected. In ORIG modem sleep mode, bluetooth controller will switch off some components and pause to work every now and then, if there is no event to process; and wakeup according to the scheduled interval and resume the work. It can also wakeup earlier upon external request using function "esp_bt_controller_wakeup_request".
+ * Note that currently there is problem in the combination use of bluetooth modem sleep and Dynamic Frequency Scaling(DFS). So do not enable DFS if bluetooth modem sleep is in use.
+ *
+ * @return
+ *                  - ESP_OK : success
+ *                  - other  : failed
+ */
+esp_err_t esp_bt_sleep_enable(void);
+
+
+/**
+ * @brief disable bluetooth modem sleep
+ *
+ * Note that this function shall not be invoked before esp_bt_controller_enable()
+ *
+ * If esp_bt_sleep_disable() is called, bluetooth controller will not be allowed to enter modem sleep;
+ *
+ * If ORIG modem sleep mode is in use, if this function is called, bluetooth controller may not immediately wake up if it is dormant then.
+ * In this case, esp_bt_controller_wakeup_request() can be used to shorten the time for wakeup.
+ *
+ * @return
+ *                  - ESP_OK : success
+ *                  - other  : failed
+ */
+esp_err_t esp_bt_sleep_disable(void);
+
+/**
+ * @brief to check whether bluetooth controller is sleeping at the instant, if modem sleep is enabled
+ *
+ * Note that this function shall not be invoked before esp_bt_controller_enable()
+ * This function is supposed to be used ORIG mode of modem sleep
+ *
+ * @return  true if in modem sleep state, false otherwise
+ */
+bool esp_bt_controller_is_sleeping(void);
+
+/**
+ * @brief request controller to wakeup from sleeping state during sleep mode
+ *
+ * Note that this function shall not be invoked before esp_bt_controller_enable()
+ * Note that this function is supposed to be used ORIG mode of modem sleep
+ * Note that after this request, bluetooth controller may again enter sleep as long as the modem sleep is enabled
+ *
+ * Profiling shows that it takes several milliseconds to wakeup from modem sleep after this request.
+ * Generally it takes longer if 32kHz XTAL is used than the main XTAL, due to the lower frequncy of the former as the bluetooth low power clock source.
+ */
+void esp_bt_controller_wakeup_request(void);
 
 #ifdef __cplusplus
 }

@@ -96,6 +96,13 @@ TEST_CASE("(WL) can lseek", "[fatfs][wear_levelling]")
     test_teardown();
 }
 
+TEST_CASE("(WL) can truncate", "[fatfs][wear_levelling]")
+{
+    test_setup();
+    test_fatfs_truncate_file("/spiflash/truncate.txt");
+    test_teardown();
+}
+
 TEST_CASE("(WL) stat returns correct values", "[fatfs][wear_levelling]")
 {
     test_setup();
@@ -145,7 +152,7 @@ TEST_CASE("(WL) multiple tasks can use same volume", "[fatfs][wear_levelling]")
     test_teardown();
 }
 
-TEST_CASE("(WL) write/read speed test", "[fatfs][wear_levelling]")
+TEST_CASE("(WL) write/read speed test", "[fatfs][wear_levelling][timeout=60]")
 {
     /* Erase partition before running the test to get consistent results */
     const esp_partition_t* part = get_test_data_partition();

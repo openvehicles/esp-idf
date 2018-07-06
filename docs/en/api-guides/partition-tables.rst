@@ -107,7 +107,7 @@ When type is "data", the subtype field can be specified as ota (0), phy (1), nvs
 - phy (1) is for storing PHY initialisation data. This allows PHY to be configured per-device, instead of in firmware.
 
   - In the default configuration, the phy partition is not used and PHY initialisation data is compiled into the app itself. As such, this partition can be removed from the partition table to save space.
-  - To load PHY data from this partition, run ``make menuconfig`` and enable :ref:`CONFIG_ESP32_PHY_INIT_DATA_IN_PARTITION` option. You will also need to flash your devices with phy init data as the esp-idf build system does not do this automatically.
+  - To load PHY data from this partition, run ``make menuconfig`` and enable :envvar:`CONFIG_ESP32_PHY_INIT_DATA_IN_PARTITION` option. You will also need to flash your devices with phy init data as the esp-idf build system does not do this automatically.
 - nvs (2) is for the :doc:`Non-Volatile Storage (NVS) API <../api-reference/storage/nvs_flash>`.
 
   - NVS is used to store per-device PHY calibration data (different to initialisation data).
@@ -136,24 +136,22 @@ If you configure the partition table CSV name in ``make menuconfig`` and then ``
 
 To convert CSV to Binary manually::
 
-  python gen_esp32part.py --verify input_partitions.csv binary_partitions.bin
+  python gen_esp32part.py input_partitions.csv binary_partitions.bin
 
 To convert binary format back to CSV::
 
-  python gen_esp32part.py --verify binary_partitions.bin input_partitions.csv
+  python gen_esp32part.py binary_partitions.bin input_partitions.csv
 
 To display the contents of a binary partition table on stdout (this is how the summaries displayed when running `make partition_table` are generated::
 
   python gen_esp32part.py binary_partitions.bin
-
-``gen_esp32part.py`` takes one optional argument, ``--verify``, which will also verify the partition table during conversion (checking for overlapping partitions, unaligned partitions, etc.)
 
 MD5 checksum
 ~~~~~~~~~~~~
 
 The binary format of the partition table contains an MD5 checksum computed based on the partition table. This checksum is used for checking the integrity of the partition table during the boot.
 
-The MD5 checksum generation can be disabled by the ``--disable-md5sum`` option of ``gen_esp32part.py`` or by the :ref:`CONFIG_PARTITION_TABLE_MD5` option. This is useful for example when one uses a legacy bootloader which cannot process MD5 checksums and the boot fails with the error message ``invalid magic number 0xebeb``.
+The MD5 checksum generation can be disabled by the ``--disable-md5sum`` option of ``gen_esp32part.py`` or by the :envvar:`CONFIG_PARTITION_TABLE_MD5` option. This is useful for example when one uses a legacy bootloader which cannot process MD5 checksums and the boot fails with the error message ``invalid magic number 0xebeb``.
 
 Flashing the partition table
 ----------------------------

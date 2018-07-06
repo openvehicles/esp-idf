@@ -203,7 +203,7 @@ void IRAM_ATTR esp_deep_sleep_start()
 {
     // record current RTC time
     s_config.rtc_ticks_at_sleep_start = rtc_time_get();
-
+    esp_sync_counters_rtc_and_frc();
     // Configure wake stub
     if (esp_get_deep_sleep_wake_stub() == NULL) {
         esp_set_deep_sleep_wake_stub(esp_wake_deep_sleep);
@@ -279,6 +279,11 @@ esp_err_t esp_light_sleep_start()
 {
     static portMUX_TYPE light_sleep_lock = portMUX_INITIALIZER_UNLOCKED;
     portENTER_CRITICAL(&light_sleep_lock);
+    /* We will be calling esp_timer_impl_advance inside DPORT access critical
+     * section. Make sure the code on the other CPU is not holding esp_timer
+     * lock, otherwise there will be deadlock.
+     */
+    esp_timer_impl_lock();
     s_config.rtc_ticks_at_sleep_start = rtc_time_get();
     uint64_t frc_time_at_start = esp_timer_get_time();
     DPORT_STALL_OTHER_CPU_START();
@@ -332,6 +337,7 @@ esp_err_t esp_light_sleep_start()
     }
     esp_set_time_from_rtc();
 
+    esp_timer_impl_unlock();
     DPORT_STALL_OTHER_CPU_END();
     rtc_wdt_disable();
     portEXIT_CRITICAL(&light_sleep_lock);
@@ -459,8 +465,7 @@ static void ext0_wakeup_prepare()
         if (desc->rtc_num == rtc_gpio_num) {
             REG_SET_BIT(desc->reg, desc->mux);
             SET_PERI_REG_BITS(desc->reg, 0x3, 0, desc->func);
-            REG_SET_BIT(desc->reg, desc->slpsel);
-            REG_SET_BIT(desc->reg, desc->slpie);
+            REG_SET_BIT(desc->reg, desc->ie);
             break;
         }
     }
@@ -502,16 +507,13 @@ static void ext1_wakeup_prepare()
         // Route pad to RTC
         REG_SET_BIT(desc->reg, desc->mux);
         SET_PERI_REG_BITS(desc->reg, 0x3, 0, desc->func);
+        // set input enable in sleep mode
+        REG_SET_BIT(desc->reg, desc->ie);
         // Pad configuration depends on RTC_PERIPH state in sleep mode
-        if (s_config.pd_options[ESP_PD_DOMAIN_RTC_PERIPH] == ESP_PD_OPTION_ON) {
-            // set input enable in sleep mode
-            REG_SET_BIT(desc->reg, desc->slpie);
-            // allow sleep status signal to control IE/SLPIE mux
-            REG_SET_BIT(desc->reg, desc->slpsel);
-        } else {
-            // RTC_PERIPH will be disabled, so need to enable input and
-            // lock pad configuration. Pullups/pulldowns also need to be disabled.
-            REG_SET_BIT(desc->reg, desc->ie);
+        if (s_config.pd_options[ESP_PD_DOMAIN_RTC_PERIPH] != ESP_PD_OPTION_ON) {
+            // RTC_PERIPH will be powered down, so RTC_IO_ registers will
+            // loose their state. Lock pad configuration.
+            // Pullups/pulldowns also need to be disabled.
             REG_CLR_BIT(desc->reg, desc->pulldown);
             REG_CLR_BIT(desc->reg, desc->pullup);
             REG_SET_BIT(RTC_CNTL_HOLD_FORCE_REG, desc->hold_force);
@@ -593,9 +595,9 @@ static uint32_t get_power_down_flags()
     // These labels are defined in the linker script:
     extern int _rtc_data_start, _rtc_data_end, _rtc_bss_start, _rtc_bss_end;
 
-    if (s_config.pd_options[ESP_PD_DOMAIN_RTC_SLOW_MEM] == ESP_PD_OPTION_AUTO ||
-            &_rtc_data_end > &_rtc_data_start ||
-            &_rtc_bss_end > &_rtc_bss_start) {
+    if ((s_config.pd_options[ESP_PD_DOMAIN_RTC_SLOW_MEM] == ESP_PD_OPTION_AUTO) &&
+            (&_rtc_data_end > &_rtc_data_start || &_rtc_bss_end > &_rtc_bss_start ||
+            (s_config.wakeup_triggers & RTC_ULP_TRIG_EN))) {
         s_config.pd_options[ESP_PD_DOMAIN_RTC_SLOW_MEM] = ESP_PD_OPTION_ON;
     }
 
