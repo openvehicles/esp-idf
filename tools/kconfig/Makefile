@@ -230,11 +230,19 @@ LOADLIBES_nconf	= $(shell \
 				|| pkg-config --libs menu panel ncurses 2>/dev/null \
 				|| echo "-lmenu -lpanel -lncurses"  )
 
-ifeq ("$(OS)","Windows_NT")
-# Windows toolchains don't seem to count libintl
-# as a system library
+# Sometimes libintl is in a separate library (Windows, FreeBSD)
+ifneq ($(wildcard /usr/local/lib/libintl.a),)
+LOADLIBES_mconf += -L/usr/local/lib -lintl
+LOADLIBES_nconf += -L/usr/local/lib -lintl
+
+ifneq ($(wildcard /usr/local/include/libintl.h),)
+CFLAGS += -I/usr/local/include
+endif
+else
+ifneq ($(wildcard /usr/lib/libintl.a),)
 LOADLIBES_mconf += -lintl
 LOADLIBES_nconf += -lintl
+endif
 endif
 
 qconf.o: .tmp_qtcheck
