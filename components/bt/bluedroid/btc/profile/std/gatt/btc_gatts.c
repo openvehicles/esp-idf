@@ -530,9 +530,6 @@ static void btc_gatts_cb_param_copy_free(btc_msg_t *msg, tBTA_GATTS *p_data)
         }
         break;
     case BTA_GATTS_CONF_EVT:
-        if (p_data && p_data->req_data.value){
-            osi_free(p_data->req_data.value);
-        }
         break;
     default:
         break;
@@ -717,6 +714,12 @@ void btc_gatts_call_handler(btc_msg_t *msg)
         }
 
         break;
+    case BTC_GATTS_ACT_SEND_SERVICE_CHANGE: {
+        BD_ADDR remote_bda;
+        memcpy(remote_bda, arg->send_service_change.remote_bda, BD_ADDR_LEN);
+        BTA_GATTS_SendServiceChangeIndication(arg->send_service_change.gatts_if, remote_bda);
+        break;
+    }
     default:
         break;
     }
@@ -900,7 +903,11 @@ void btc_gatts_cb_handler(btc_msg_t *msg)
 
         btc_gatts_cb_to_app(BTA_GATTS_CLOSE_EVT, gatts_if, &param);
         break;
-
+    case BTA_GATTS_SEND_SERVICE_CHANGE_EVT:
+        gatts_if = p_data->service_change.server_if;
+        param.service_change.status = p_data->service_change.status;
+        btc_gatts_cb_to_app(ESP_GATTS_SEND_SERVICE_CHANGE_EVT, gatts_if, &param);
+        break;
     case BTA_GATTS_LISTEN_EVT:
         // do nothing
         break;

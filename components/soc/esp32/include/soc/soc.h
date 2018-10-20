@@ -120,6 +120,7 @@
 #define DR_REG_I2C1_EXT_BASE                    0x3ff67000
 #define DR_REG_SDMMC_BASE                       0x3ff68000
 #define DR_REG_EMAC_BASE                        0x3ff69000
+#define DR_REG_CAN_BASE                         0x3ff6B000
 #define DR_REG_PWM1_BASE                        0x3ff6C000
 #define DR_REG_I2S1_BASE                        0x3ff6D000
 #define DR_REG_UART2_BASE                       0x3ff6E000
@@ -133,6 +134,7 @@
 
 #ifndef __ASSEMBLER__
 #define BIT(nr)                 (1UL << (nr))
+#define BIT64(nr)               (1ULL << (nr))
 #else
 #define BIT(nr)                 (1 << (nr))
 #endif
@@ -286,6 +288,8 @@
 #define SOC_IRAM_HIGH   0x400A0000
 #define SOC_RTC_IRAM_LOW  0x400C0000
 #define SOC_RTC_IRAM_HIGH 0x400C2000
+#define SOC_RTC_DRAM_LOW  0x3FF80000
+#define SOC_RTC_DRAM_HIGH 0x3FF82000
 #define SOC_RTC_DATA_LOW  0x50000000
 #define SOC_RTC_DATA_HIGH 0x50002000
 

@@ -13,13 +13,16 @@
 #include "freertos/task.h"
 #include "freertos/queue.h"
 
+#define WAKE_UP_IGNORE 1  // gpio_wakeup function development is not completed yet, set it deprecated.
 #define GPIO_OUTPUT_IO   18  // default output GPIO
 #define GPIO_INPUT_IO   19  // default input GPIO
 #define GPIO_OUTPUT_MAX GPIO_NUM_34
 static volatile int disable_intr_times = 0;  // use this to calculate how many times it go into interrupt
 static volatile int level_intr_times = 0;  // use this to get how many times the level interrupt happened
 static volatile int edge_intr_times = 0;   // use this to get how many times the edge interrupt happened
+#if !WAKE_UP_IGNORE
 static bool wake_up_result = false;  // use this to judge the wake up event happen or not
+#endif
 
 /**
  * do some initialization operation in this function
@@ -70,6 +73,7 @@ static void gpio_isr_level_handler2(void* arg)
     ets_printf("GPIO[%d] intr, val: %d, level_intr_times = %d\n", gpio_num, gpio_get_level(gpio_num), level_intr_times);
 }
 
+#if !WAKE_UP_IGNORE
 // get result of waking up or not
 static void sleep_wake_up(void *arg)
 {
@@ -92,7 +96,7 @@ static void trigger_wake_up(void *arg)
     gpio_set_level(GPIO_OUTPUT_IO, 1);
     vTaskDelay(100 / portTICK_RATE_MS);
 }
-
+#endif
 
 static void prompt_to_continue(const char* str)
 {
@@ -283,6 +287,31 @@ TEST_CASE("GPIO low level interrupt test", "[gpio][test_env=UT_T1_GPIO]")
     gpio_uninstall_isr_service();
 }
 
+TEST_CASE("GPIO multi-level interrupt test, to cut the interrupt source exit interrupt ", "[gpio][test_env=UT_T1_GPIO]")
+{
+    level_intr_times=0;
+    gpio_config_t output_io = init_io(GPIO_OUTPUT_IO);
+    gpio_config_t input_io = init_io(GPIO_INPUT_IO);
+    input_io.intr_type = GPIO_INTR_POSEDGE;
+    input_io.mode = GPIO_MODE_INPUT;
+    input_io.pull_up_en = 1;
+    TEST_ESP_OK(gpio_config(&output_io));
+    TEST_ESP_OK(gpio_config(&input_io));
+    TEST_ESP_OK(gpio_set_level(GPIO_OUTPUT_IO, 0));
+
+    gpio_set_intr_type(GPIO_INPUT_IO, GPIO_INTR_HIGH_LEVEL);
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(GPIO_INPUT_IO, gpio_isr_level_handler2, (void*) GPIO_INPUT_IO);
+    gpio_set_level(GPIO_OUTPUT_IO, 1);
+    vTaskDelay(100 / portTICK_RATE_MS);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(level_intr_times, 1, "go into high-level interrupt more than once with cur interrupt source way");
+    gpio_set_level(GPIO_OUTPUT_IO, 1);
+    vTaskDelay(200 / portTICK_RATE_MS);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(level_intr_times, 2, "go into high-level interrupt more than once with cur interrupt source way");
+    gpio_isr_handler_remove(GPIO_INPUT_IO);
+    gpio_uninstall_isr_service();
+}
+
 TEST_CASE("GPIO enable and disable interrupt test", "[gpio][test_env=UT_T1_GPIO]")
 {
     gpio_config_t output_io = init_io(GPIO_OUTPUT_IO);
@@ -465,6 +494,7 @@ TEST_CASE("GPIO repeate call service and isr has no memory leak test","[gpio][te
     TEST_ASSERT_INT32_WITHIN(size, esp_get_free_heap_size(), 100);
 }
 
+#if !WAKE_UP_IGNORE
 //this function development is not completed yet, set it ignored
 TEST_CASE("GPIO wake up enable and disenable test", "[gpio][ignore]")
 {
@@ -479,6 +509,7 @@ TEST_CASE("GPIO wake up enable and disenable test", "[gpio][ignore]")
     vTaskDelay(100 / portTICK_RATE_MS);
     TEST_ASSERT_FALSE(wake_up_result);
 }
+#endif
 
 // this case need the resistance to pull up the voltage or pull down the voltage
 // ignored because the voltage needs to be tested with multimeter

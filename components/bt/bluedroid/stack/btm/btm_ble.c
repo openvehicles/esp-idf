@@ -425,6 +425,45 @@ void BTM_BlePasskeyReply (BD_ADDR bd_addr, UINT8 res, UINT32 passkey)
 
 /*******************************************************************************
 **
+** Function         BTM_BleSetStaticPasskey
+**
+** Description      This function is called to set static passkey
+**
+**
+** Parameters:      add          - set static passkey when add is TRUE
+**                                 clear static passkey when add is FALSE
+**                  passkey      - static passkey
+**
+**
+*******************************************************************************/
+void BTM_BleSetStaticPasskey(BOOLEAN add, UINT32 passkey)
+{
+#if SMP_INCLUDED == TRUE
+    SMP_SetStaticPasskey(add, passkey);
+#endif
+}
+
+/*******************************************************************************
+**
+** Function         BTM_BleSetAcceptAuthMode
+**
+** Description      This function is called to set only accept specified Authentication
+**
+**
+** Parameters:      enable         - Whether to enable this function
+**
+**                  auth_mode      - Authentication mode
+**
+**
+*******************************************************************************/
+void BTM_BleSetAcceptAuthMode(UINT8 enable, UINT8 auth_mode)
+{
+#if SMP_INCLUDED == TRUE
+    SMP_SetAcceptAuthMode(enable, auth_mode);
+#endif
+}
+/*******************************************************************************
+**
 ** Function         BTM_BleConfirmReply
 **
 ** Description      This function is called after Security Manager submitted
@@ -1105,7 +1144,7 @@ BOOLEAN btm_ble_get_enc_key_type(BD_ADDR bd_addr, UINT8 *p_key_types)
 **
 ** Description      This function is called to read the local DIV
 **
-** Returns          TURE - if a valid DIV is availavle
+** Returns          TRUE - if a valid DIV is availavle
 *******************************************************************************/
 BOOLEAN btm_get_local_div (BD_ADDR bd_addr, UINT16 *p_div)
 {
@@ -1225,7 +1264,7 @@ void btm_sec_save_le_key(BD_ADDR bd_addr, tBTM_LE_KEY_TYPE key_type, tBTM_LE_KEY
 
             /* Set that link key is known since this shares field with BTM_SEC_FLAG_LKEY_KNOWN flag in stack/btm_api.h*/
             p_rec->sec_flags |=  BTM_SEC_LE_LINK_KEY_KNOWN;
-            if ( p_keys->pcsrk_key.sec_level == SMP_SEC_AUTHENTICATED) {
+            if ( p_keys->lenc_key.sec_level == SMP_SEC_AUTHENTICATED) {
                 p_rec->sec_flags |= BTM_SEC_LE_LINK_KEY_AUTHED;
             } else {
                 p_rec->sec_flags &= ~BTM_SEC_LE_LINK_KEY_AUTHED;

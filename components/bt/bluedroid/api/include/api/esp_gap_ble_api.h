@@ -60,6 +60,9 @@ typedef uint8_t esp_ble_key_type_t;
 #define ESP_LE_AUTH_REQ_SC_MITM_BOND        (ESP_LE_AUTH_REQ_MITM | ESP_LE_AUTH_REQ_SC_ONLY | ESP_LE_AUTH_BOND)   /*!< 1101 */  /* relate to BTM_LE_AUTH_REQ_SC_MITM_BOND in stack/btm_api.h */
 typedef uint8_t   esp_ble_auth_req_t;         /*!< combination of the above bit pattern */
 
+#define ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_DISABLE 0
+#define ESP_BLE_ONLY_ACCEPT_SPECIFIED_AUTH_ENABLE  1
+
 /* relate to BTM_IO_CAP_xxx in stack/btm_api.h */
 #define ESP_IO_CAP_OUT                      0   /*!< DisplayOnly */         /* relate to BTM_IO_CAP_OUT in stack/btm_api.h */
 #define ESP_IO_CAP_IO                       1   /*!< DisplayYesNo */        /* relate to BTM_IO_CAP_IO in stack/btm_api.h */
@@ -151,7 +154,7 @@ typedef enum {
     ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT,                     /*!< When stop scan complete, the event comes */
     ESP_GAP_BLE_SET_STATIC_RAND_ADDR_EVT,                   /*!< When set the static rand address complete, the event comes */
     ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT,                     /*!< When update connection parameters complete, the event comes */
-    ESP_GAP_BLE_SET_PKT_LENGTH_COMPLETE_EVT,                /*!< When set pkt lenght complete, the event comes */
+    ESP_GAP_BLE_SET_PKT_LENGTH_COMPLETE_EVT,                /*!< When set pkt length complete, the event comes */
     ESP_GAP_BLE_SET_LOCAL_PRIVACY_COMPLETE_EVT,             /*!< When  Enable/disable privacy on the local device complete, the event comes */
     ESP_GAP_BLE_REMOVE_BOND_DEV_COMPLETE_EVT,               /*!< When remove the bond device complete, the event comes */
     ESP_GAP_BLE_CLEAR_BOND_DEV_COMPLETE_EVT,                /*!< When clear the bond device clear complete, the event comes */
@@ -264,6 +267,10 @@ typedef enum {
     ESP_BLE_SM_SET_INIT_KEY,
     ESP_BLE_SM_SET_RSP_KEY,
     ESP_BLE_SM_MAX_KEY_SIZE,
+    ESP_BLE_SM_SET_STATIC_PASSKEY,
+    ESP_BLE_SM_CLEAR_STATIC_PASSKEY,
+    ESP_BLE_SM_ONLY_ACCEPT_SPECIFIED_SEC_AUTH,
+    ESP_BLE_SM_MAX_PARAM,
 } esp_ble_sm_param_t;
 
 /// Advertising parameters
@@ -289,8 +296,21 @@ typedef struct {
     bool                    set_scan_rsp;           /*!< Set this advertising data as scan response or not*/
     bool                    include_name;           /*!< Advertising data include device name or not */
     bool                    include_txpower;        /*!< Advertising data include TX power */
-    int                     min_interval;           /*!< Advertising data show advertising min interval */
-    int                     max_interval;           /*!< Advertising data show advertising max interval */
+    int                     min_interval;           /*!< Advertising data show slave preferred connection min interval.
+                                                    The connection interval in the following manner:
+                                                    connIntervalmin = Conn_Interval_Min * 1.25 ms
+                                                    Conn_Interval_Min range: 0x0006 to 0x0C80
+                                                    Value of 0xFFFF indicates no specific minimum.
+                                                    Values not defined above are reserved for future use.*/
+
+    int                     max_interval;           /*!< Advertising data show slave preferred connection max interval. 
+                                                    The connection interval in the following manner:
+                                                    connIntervalmax = Conn_Interval_Max * 1.25 ms 
+                                                    Conn_Interval_Max range: 0x0006 to 0x0C80
+                                                    Conn_Interval_Max shall be equal to or greater than the Conn_Interval_Min.
+                                                    Value of 0xFFFF indicates no specific maximum.
+                                                    Values not defined above are reserved for future use.*/
+
     int                     appearance;             /*!< External appearance of device */
     uint16_t                manufacturer_len;       /*!< Manufacturer data length */
     uint8_t                 *p_manufacturer_data;   /*!< Manufacturer data point */
@@ -455,7 +475,7 @@ typedef union
 } esp_ble_key_value_t;                    /*!< ble key value type*/
 
 /**
-* @brief  struct type of the bond key informatuon value
+* @brief  struct type of the bond key information value
 */
 typedef struct
 {
@@ -508,7 +528,8 @@ typedef struct
     uint8_t               fail_reason;           /*!< The HCI reason/error code for when success=FALSE */
     esp_ble_addr_type_t   addr_type;             /*!< Peer device address type */
     esp_bt_dev_type_t     dev_type;              /*!< Device type */
-} esp_ble_auth_cmpl_t;                           /*!< The ble authentication complite cb type */
+    esp_ble_auth_req_t    auth_mode;             /*!< authentication mode */
+} esp_ble_auth_cmpl_t;                           /*!< The ble authentication complete cb type */
 
 /**
   * @brief union associated with ble security
@@ -520,7 +541,7 @@ typedef union
     esp_ble_key_t              ble_key;        /*!< BLE SMP keys used when pairing */
     esp_ble_local_id_keys_t    ble_id_keys;    /*!< BLE IR event */
     esp_ble_auth_cmpl_t        auth_cmpl;      /*!< Authentication complete indication. */
-} esp_ble_sec_t;                               /*!< Ble  secutity type */
+} esp_ble_sec_t;                               /*!< BLE security type */
 
 /// Sub Event of ESP_GAP_BLE_SCAN_RESULT_EVT
 typedef enum {
@@ -817,10 +838,8 @@ esp_err_t esp_ble_gap_update_conn_params(esp_ble_conn_update_params_t *params);
  */
 esp_err_t esp_ble_gap_set_pkt_data_len(esp_bd_addr_t remote_device, uint16_t tx_data_length);
 
-
-
 /**
- * @brief           This function set the random address for the application
+ * @brief           This function sets the random address for the application
  *
  * @param[in]       rand_addr: the random address which should be setting
  *
@@ -830,6 +849,16 @@ esp_err_t esp_ble_gap_set_pkt_data_len(esp_bd_addr_t remote_device, uint16_t tx_
  *
  */
 esp_err_t esp_ble_gap_set_rand_addr(esp_bd_addr_t rand_addr);
+
+/**
+ * @brief           This function clears the random address for the application
+ *
+ * @return
+ *                  - ESP_OK : success
+ *                  - other  : failed
+ *
+ */
+esp_err_t esp_ble_gap_clear_rand_addr(void);
 
 
 
@@ -1023,10 +1052,10 @@ esp_err_t esp_ble_gap_security_rsp(esp_bd_addr_t bd_addr,  bool accept);
 esp_err_t esp_ble_set_encryption(esp_bd_addr_t bd_addr, esp_ble_sec_act_t sec_act);
 
 /**
-* @brief          Reply the key value to the peer device in the lagecy connection stage.
+* @brief          Reply the key value to the peer device in the legacy connection stage.
 *
 * @param[in]      bd_addr : BD address of the peer
-* @param[in]      accept : passkey entry sucessful or declined.
+* @param[in]      accept : passkey entry successful or declined.
 * @param[in]      passkey : passkey value, must be a 6 digit number,
 *                                     can be lead by 0.
 *
@@ -1038,7 +1067,7 @@ esp_err_t esp_ble_passkey_reply(esp_bd_addr_t bd_addr, bool accept, uint32_t pas
 
 
 /**
-* @brief           Reply the comfirm value to the peer device in the lagecy connection stage.
+* @brief           Reply the confirm value to the peer device in the legacy connection stage.
 *
 * @param[in]       bd_addr : BD address of the peer device
 * @param[in]       accept : numbers to compare are the same or different.
@@ -1091,7 +1120,7 @@ esp_err_t esp_ble_get_bond_device_list(int *dev_num, esp_ble_bond_dev_t *dev_lis
 
 /**
 * @brief           This function is to disconnect the physical connection of the peer device
-*                  gattc maybe have multiple virtual GATT server connections when multiple app_id registed.
+*                  gattc may have multiple virtual GATT server connections when multiple app_id registered.
 *                  esp_ble_gattc_close (esp_gatt_if_t gattc_if, uint16_t conn_id) only close one virtual GATT server connection.
 *                  if there exist other virtual GATT server connections, it does not disconnect the physical connection.
 *                  esp_ble_gap_disconnect(esp_bd_addr_t remote_device) disconnect the physical connection directly.

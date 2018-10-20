@@ -1,4 +1,5 @@
 #include <string.h>
+#include <sys/param.h>
 #include "unity.h"
 #include "test_utils.h"             // unity_send_signal
 #include "driver/uart.h"            // for the uart driver access
@@ -135,6 +136,23 @@ TEST_CASE("test uart get baud-rate","[uart]")
     ESP_LOGI(UART_TAG, "get baud-rate test passed  ....\n");
 }
 
+TEST_CASE("test uart tx data with break","[uart]")
+{
+    const int buf_len = 200;
+    const int send_len = 128;
+    const int brk_len = 10;
+    char *psend = (char *)malloc(buf_len);
+    TEST_ASSERT( psend != NULL);
+    memset(psend, '0', buf_len);
+    uart_config(UART_BAUD_115200, false);
+    printf("Uart%d send %d bytes with break\n", UART_NUM1, send_len);
+    uart_write_bytes_with_break(UART_NUM1, (const char *)psend, send_len, brk_len);
+    uart_wait_tx_done(UART_NUM1, (portTickType)portMAX_DELAY);
+    //If the code is running here, it means the test passed, otherwise it will crash due to the interrupt wdt timeout.
+    printf("Send data with break test passed\n");
+    free(psend);
+}
+
 // Calculate buffer checksum using tables 
 // The checksum CRC16 algorithm is specific
 // for Modbus standard and uses polynomial value = 0xA001
@@ -159,26 +177,19 @@ static uint16_t get_buffer_crc16( uint8_t * frame_ptr, uint16_t length )
 static uint16_t buffer_fill_random(uint8_t *buffer, size_t length)
 {
     TEST_ASSERT( buffer != NULL);
-    uint8_t *byte_buffer = (uint8_t *)buffer;
-    uint32_t random;
-    // Pcket is too short
+    // Packet is too short
     if (length < 4) {
         return 0;
     }
-    for (int i = 0; i < length; i++) {
-        if (i == 0 || i % 4 == 0) { 
-            // Generates random int32_t number
-            random = esp_random();
-        }
-
-        // Place each byte of the uint32_t random number into buffer
-        byte_buffer[i] = random >> ((i % 4) * 8);
+    for (int i = 0; i < length; i += 4) {
+        uint32_t random = esp_random();
+        memcpy(buffer + i, &random, MIN(length - i, 4));
     }
     // Get checksum of the buffer
-    uint16_t crc = get_buffer_crc16((uint8_t*)byte_buffer, (length - 2));
+    uint16_t crc = get_buffer_crc16((uint8_t*)buffer, (length - 2));
     // Apply checksum bytes into packet
-    byte_buffer[length - 2] = (uint8_t)(crc & 0xFF);         // Set Low byte CRC
-    byte_buffer[length - 1] = (uint8_t)(crc >> 8);           // Set High byte CRC
+    buffer[length - 2] = (uint8_t)(crc & 0xFF);         // Set Low byte CRC
+    buffer[length - 1] = (uint8_t)(crc >> 8);           // Set High byte CRC
     return crc;
 }
 
@@ -241,7 +252,7 @@ static void rs485_slave()
         if (len > 2) {
             esp_err_t status = print_packet_data("Received ", slave_data, len);
 
-            // If recieved packet is correct then send it back
+            // If received packet is correct then send it back
             if (status == ESP_OK) {
                 uart_write_bytes(UART_NUM1, (char*)slave_data, len);
                 good_count++;
@@ -313,5 +324,5 @@ static void rs485_master()
  * correctness of RS485 interface channel communication. It requires
  * RS485 bus driver hardware to be connected to boards.
 */
-TEST_CASE_MULTIPLE_DEVICES("RS485 half duplex uart multiple devices test.", "[driver][ignore]", rs485_master, rs485_slave);
+TEST_CASE_MULTIPLE_DEVICES("RS485 half duplex uart multiple devices test.", "[driver_RS485][test_env=UT_T2_RS485]", rs485_master, rs485_slave);
 

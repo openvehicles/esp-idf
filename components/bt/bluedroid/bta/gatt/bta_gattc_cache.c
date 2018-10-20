@@ -376,14 +376,8 @@ static tBTA_GATT_STATUS bta_gattc_add_attr_to_cache(tBTA_GATTC_SERV *p_srvc_cb,
         isvc->included_service = bta_gattc_find_matching_service(
                                     p_srvc_cb->p_srvc_cache, incl_srvc_s_handle);
         if (!isvc->included_service) {
-            // if it is a secondary service, wait to update later
-            if(property == 0){
-                p_srvc_cb->update_sec_sev = true;   
-            } else {
-                APPL_TRACE_ERROR("%s: Illegal action to add non-existing included service!", __func__);
-                osi_free(isvc);
-                return GATT_WRONG_STATE;
-            }
+            // if can't find included service, wait to update later
+            p_srvc_cb->update_incl_srvc = true;
         }
 
         list_append(service->included_svc, isvc);
@@ -606,10 +600,10 @@ static void bta_gattc_explore_srvc(UINT16 conn_id, tBTA_GATTC_SERV *p_srvc_cb)
             return;
         }
     }
-    //update include service when have secondary service
-    if(p_srvc_cb->update_sec_sev) {
+    // if update_incl_srvc is true, update include service
+    if(p_srvc_cb->update_incl_srvc) {
         bta_gattc_update_include_service(p_srvc_cb->p_srvc_cache);
-        p_srvc_cb->update_sec_sev = false;
+        p_srvc_cb->update_incl_srvc = false;
     }
     /* no service found at all, the end of server discovery*/
     APPL_TRACE_DEBUG("%s no more services found", __func__);
@@ -1297,7 +1291,9 @@ void bta_gattc_get_db_with_opration(UINT16 conn_id,
     tBTA_GATTC_CLCB *p_clcb = bta_gattc_find_clcb_by_conn_id(conn_id);
 
     if (p_clcb == NULL) {
-        return NULL;
+        *count = 0;
+        *char_db = NULL;
+        return;
     }
 
     tBTA_GATTC_SERV *p_srcb = p_clcb->p_srcb;
@@ -1658,7 +1654,8 @@ void bta_gattc_get_db_size_handle(UINT16 conn_id, UINT16 start_handle, UINT16 en
     tBTA_GATTC_CLCB *p_clcb = bta_gattc_find_clcb_by_conn_id(conn_id);
 
     if (p_clcb == NULL) {
-        return NULL;
+        *count = 0;
+        return;
     }
     
     tBTA_GATTC_SERV *p_srcb = p_clcb->p_srcb;
@@ -1676,7 +1673,8 @@ void bta_gattc_get_db_size_with_type_handle(UINT16 conn_id, bt_gatt_db_attribute
     tBTA_GATTC_CLCB *p_clcb = bta_gattc_find_clcb_by_conn_id(conn_id);
 
     if (p_clcb == NULL) {
-        return NULL;
+        *count = 0;
+        return;
     }
     
     tBTA_GATTC_SERV *p_srcb = p_clcb->p_srcb;
@@ -2118,7 +2116,7 @@ bool bta_gattc_cache_load(tBTA_GATTC_CLCB *p_clcb)
         APPL_TRACE_DEBUG("%s(), gattc cache load fail, status = %x", __func__, status);
         return false;
     }
-
+    p_clcb->searched_service_source = BTA_GATTC_SERVICE_INFO_FROM_NVS_FLASH;
     bta_gattc_rebuild_cache(p_clcb->p_srcb, num_attr, attr);
     //free the attr buffer after used.
     osi_free(attr);

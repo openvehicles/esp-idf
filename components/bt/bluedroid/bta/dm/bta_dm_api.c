@@ -438,6 +438,29 @@ void BTA_DmBondCancel(BD_ADDR bd_addr)
 
 /*******************************************************************************
 **
+** Function         BTA_DMSetPinType
+**
+** Description      This function set pin type as BTM_PIN_TYPE_FIXED or BTM_PIN_TYPE_VARIABLE
+**
+**
+** Returns          void
+**
+*******************************************************************************/
+void BTA_DMSetPinType (UINT8 pin_type, UINT8 *pin_code, UINT8 pin_code_len)
+{
+    tBTA_DM_API_SET_PIN_TYPE    *p_msg;
+
+    if ((p_msg = (tBTA_DM_API_SET_PIN_TYPE *) osi_malloc(sizeof(tBTA_DM_API_SET_PIN_TYPE))) != NULL) {
+        p_msg->hdr.event = BTA_DM_API_SET_PIN_TYPE_EVT;
+        p_msg->pin_type = pin_type;
+        p_msg->pin_len = pin_code_len;
+        memcpy(p_msg->p_pin, pin_code, pin_code_len);
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+/*******************************************************************************
+**
 ** Function         BTA_DmPinReply
 **
 ** Description      This function provides a pincode for a remote device when
@@ -448,7 +471,6 @@ void BTA_DmBondCancel(BD_ADDR bd_addr)
 **
 *******************************************************************************/
 void BTA_DmPinReply(BD_ADDR bd_addr, BOOLEAN accept, UINT8 pin_len, UINT8 *p_pin)
-
 {
     tBTA_DM_API_PIN_REPLY    *p_msg;
 
@@ -511,6 +533,29 @@ void BTA_DmConfirm(BD_ADDR bd_addr, BOOLEAN accept)
     }
 }
 
+/*******************************************************************************
+**
+** Function         BTA_DmPasskeyReqReply
+**
+** Description      This function is called to provide the passkey for
+**                  Simple Pairing in response to BTA_DM_SP_KEY_REQ_EVT
+**
+** Returns          void
+**
+*******************************************************************************/
+#if (BT_SSP_INCLUDED == TRUE)
+void BTA_DmPasskeyReqReply(BOOLEAN accept, BD_ADDR bd_addr, UINT32 passkey)
+{
+    tBTA_DM_API_KEY_REQ    *p_msg;
+    if ((p_msg = (tBTA_DM_API_KEY_REQ *) osi_malloc(sizeof(tBTA_DM_API_KEY_REQ))) != NULL) {
+        p_msg->hdr.event = BTA_DM_API_KEY_REQ_EVT;
+        bdcpy(p_msg->bd_addr, bd_addr);
+        p_msg->accept = accept;
+        p_msg->passkey = passkey;
+        bta_sys_sendmsg(p_msg);
+    }
+}
+#endif ///BT_SSP_INCLUDED == TRUE
 /*******************************************************************************
 **
 ** Function         BTA_DmAddDevice
@@ -803,6 +848,21 @@ void BTA_DmBlePasskeyReply(BD_ADDR bd_addr, BOOLEAN accept, UINT32 passkey)
         bta_sys_sendmsg(p_msg);
     }
 }
+
+void BTA_DmBleSetStaticPasskey(bool add, uint32_t passkey)
+{
+    tBTA_DM_API_SET_DEFAULT_PASSKEY    *p_msg;
+
+    if ((p_msg = (tBTA_DM_API_SET_DEFAULT_PASSKEY *) osi_malloc(sizeof(tBTA_DM_API_SET_DEFAULT_PASSKEY))) != NULL) {
+        memset(p_msg, 0, sizeof(tBTA_DM_API_SET_DEFAULT_PASSKEY));
+
+        p_msg->hdr.event = BTA_DM_API_BLE_SET_STATIC_PASSKEY_EVT;
+        p_msg->add = add;
+        p_msg->static_passkey = passkey;
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
 /*******************************************************************************
 **
 ** Function         BTA_DmBleConfirmReply
@@ -2328,6 +2388,16 @@ extern void BTA_DmSetRandAddress(BD_ADDR rand_addr, tBTA_SET_RAND_ADDR_CBACK *p_
         p_msg->addr_type = BLE_ADDR_RANDOM;
         p_msg->p_set_rand_addr_cback = p_set_rand_addr_cback;
         //start sent the msg to the bta system control moudle
+        bta_sys_sendmsg(p_msg);
+    }
+}
+
+void BTA_DmClearRandAddress(void)
+{
+    tBTA_DM_APT_CLEAR_ADDR *p_msg;
+    if ((p_msg = (tBTA_DM_APT_CLEAR_ADDR *) osi_malloc(sizeof(tBTA_DM_APT_CLEAR_ADDR))) != NULL) {
+        memset(p_msg, 0, sizeof(tBTA_DM_APT_CLEAR_ADDR));
+        p_msg->hdr.event = BTA_DM_API_CLEAR_RAND_ADDR_EVT;
         bta_sys_sendmsg(p_msg);
     }
 }

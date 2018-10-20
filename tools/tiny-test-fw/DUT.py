@@ -37,6 +37,7 @@ User should implement their DUTTool classes.
 If they using different port then need to implement their DUTPort class as well.
 """
 
+from __future__ import print_function
 import time
 import re
 import threading
@@ -117,7 +118,7 @@ class _DataCache(_queue.Queue):
                 break
         return ret
 
-    def get_data(self, timeout=0):
+    def get_data(self, timeout=0.0):
         """
         get a copy of data from cache.
 
@@ -152,6 +153,52 @@ class _DataCache(_queue.Queue):
 
         if index > 0:
             self.data_cache = self.data_cache[index:]
+
+
+class _LogThread(threading.Thread, _queue.Queue):
+    """
+    We found some SD card on Raspberry Pi could have very bad performance.
+    It could take seconds to save small amount of data.
+    If the DUT receives data and save it as log, then it stops receiving data until log is saved.
+    This could lead to expect timeout.
+    As an workaround to this issue, ``BaseDUT`` class will create a thread to save logs.
+    Then data will be passed to ``expect`` as soon as received.
+    """
+    def __init__(self):
+        threading.Thread.__init__(self, name="LogThread")
+        _queue.Queue.__init__(self, maxsize=0)
+        self.setDaemon(True)
+        self.flush_lock = threading.Lock()
+
+    def save_log(self, filename, data):
+        """
+        :param filename: log file name
+        :param data: log data. Must be ``bytes``.
+        """
+        self.put({"filename": filename, "data": data})
+
+    def flush_data(self):
+        with self.flush_lock:
+            data_cache = dict()
+            while True:
+                # move all data from queue to data cache
+                try:
+                    log = self.get_nowait()
+                    try:
+                        data_cache[log["filename"]] += log["data"]
+                    except KeyError:
+                        data_cache[log["filename"]] = log["data"]
+                except _queue.Empty:
+                    break
+            # flush data
+            for filename in data_cache:
+                with open(filename, "ab+") as f:
+                    f.write(data_cache[filename])
+
+    def run(self):
+        while True:
+            time.sleep(1)
+            self.flush_data()
 
 
 class _RecvThread(threading.Thread):
@@ -213,7 +260,11 @@ class BaseDUT(object):
     :param kwargs: extra args for DUT to create ports
     """
 
-    DEFAULT_EXPECT_TIMEOUT = 5
+    DEFAULT_EXPECT_TIMEOUT = 10
+    MAX_EXPECT_FAILURES_TO_SAVED = 10
+
+    LOG_THREAD = _LogThread()
+    LOG_THREAD.start()
 
     def __init__(self, name, port, log_file, app, **kwargs):
 
@@ -224,11 +275,32 @@ class BaseDUT(object):
         self.app = app
         self.data_cache = _DataCache()
         self.receive_thread = None
+        self.expect_failures = []
         # open and start during init
         self.open()
 
     def __str__(self):
         return "DUT({}: {})".format(self.name, str(self.port))
+
+    def _save_expect_failure(self, pattern, data, start_time):
+        """
+        Save expect failure. If the test fails, then it will print the expect failures.
+        In some cases, user will handle expect exceptions.
+        The expect failures could be false alarm, and test case might generate a lot of such failures.
+        Therefore, we don't print the failure immediately and limit the max size of failure list.
+        """
+        self.expect_failures.insert(0, {"pattern": pattern, "data": data,
+                                        "start": start_time, "end": time.time()})
+        self.expect_failures = self.expect_failures[:self.MAX_EXPECT_FAILURES_TO_SAVED]
+
+    def _save_dut_log(self, data):
+        """
+        Save DUT log into file using another thread.
+        This is a workaround for some devices takes long time for file system operations.
+
+        See descriptions in ``_LogThread`` for details.
+        """
+        self.LOG_THREAD.save_log(self.log_file, data)
 
     # define for methods need to be overwritten by Port
     @classmethod
@@ -329,6 +401,22 @@ class BaseDUT(object):
         if self.receive_thread:
             self.receive_thread.exit()
         self._port_close()
+        self.LOG_THREAD.flush_data()
+
+    @staticmethod
+    def u_to_bytearray(data):
+        """
+        if data is not bytearray then it tries to convert it
+
+        :param data: data which needs to be checked and maybe transformed
+        """
+        if type(data) is type(u''):
+            try:
+                data = data.encode('utf-8')
+            except:
+                print(u'Cannot encode {} of type {}'.format(data, type(data)))
+                raise
+        return data
 
     def write(self, data, eol="\r\n", flush=True):
         """
@@ -344,7 +432,7 @@ class BaseDUT(object):
             self.data_cache.flush()
         # do write if cache
         if data is not None:
-            self._port_write(data + eol if eol else data)
+            self._port_write(self.u_to_bytearray(data) + self.u_to_bytearray(eol) if eol else self.u_to_bytearray(data))
 
     @_expect_lock
     def read(self, size=0xFFFFFFFF):
@@ -389,9 +477,13 @@ class BaseDUT(object):
         :return: match groups if match succeed otherwise None
         """
         ret = None
+        if type(pattern.pattern) is type(u''):
+            pattern = re.compile(BaseDUT.u_to_bytearray(pattern.pattern))
+        if type(data) is type(u''):
+            data = BaseDUT.u_to_bytearray(data)
         match = pattern.search(data)
         if match:
-            ret = match.groups()
+            ret = tuple(x.decode() for x in match.groups())
             index = match.end()
         else:
             index = -1
@@ -399,7 +491,8 @@ class BaseDUT(object):
 
     EXPECT_METHOD = [
         [type(re.compile("")), "_expect_re"],
-        [str, "_expect_str"],
+        [type(b''), "_expect_str"], # Python 2 & 3 hook to work without 'from builtins import str' from future
+        [type(u''), "_expect_str"],
     ]
 
     def _get_expect_method(self, pattern):
@@ -437,14 +530,19 @@ class BaseDUT(object):
         start_time = time.time()
         while True:
             ret, index = method(data, pattern)
-            if ret is not None or time.time() - start_time > timeout:
+            if ret is not None:
                 self.data_cache.flush(index)
                 break
+            time_remaining = start_time + timeout - time.time()
+            if time_remaining < 0:
+                break
             # wait for new data from cache
-            data = self.data_cache.get_data(time.time() + timeout - start_time)
+            data = self.data_cache.get_data(time_remaining)
 
         if ret is None:
-            raise ExpectTimeout(self.name + ": " + _pattern_to_string(pattern))
+            pattern = _pattern_to_string(pattern)
+            self._save_expect_failure(pattern, data, start_time)
+            raise ExpectTimeout(self.name + ": " + pattern)
         return ret
 
     def _expect_multi(self, expect_all, expect_item_list, timeout):
@@ -492,13 +590,17 @@ class BaseDUT(object):
             else:
                 match_succeed = True if matched_expect_items else False
 
-            if time.time() - start_time > timeout or match_succeed:
+            time_remaining = start_time + timeout - time.time()
+            if time_remaining < 0 or match_succeed:
                 break
             else:
-                data = self.data_cache.get_data(time.time() + timeout - start_time)
+                data = self.data_cache.get_data(time_remaining)
 
         if match_succeed:
-            # do callback and flush matched data cache
+            # sort matched items according to order of appearance in the input data,
+            # so that the callbacks are invoked in correct order
+            matched_expect_items = sorted(matched_expect_items, key=lambda it: it["index"])
+            # invoke callbacks and flush matched data cache
             slice_index = -1
             for expect_item in matched_expect_items:
                 # trigger callback
@@ -508,7 +610,9 @@ class BaseDUT(object):
             # flush already matched data
             self.data_cache.flush(slice_index)
         else:
-            raise ExpectTimeout(self.name + ": " + str([_pattern_to_string(x) for x in expect_items]))
+            pattern = str([_pattern_to_string(x["pattern"]) for x in expect_items])
+            self._save_expect_failure(pattern, data, start_time)
+            raise ExpectTimeout(self.name + ": " + pattern)
 
     @_expect_lock
     def expect_any(self, *expect_items, **timeout):
@@ -554,6 +658,22 @@ class BaseDUT(object):
             timeout["timeout"] = self.DEFAULT_EXPECT_TIMEOUT
         return self._expect_multi(True, expect_items, **timeout)
 
+    @staticmethod
+    def _format_ts(ts):
+        return "{}:{}".format(time.strftime("%m-%d %H:%M:%S", time.localtime(ts)), str(ts % 1)[2:5])
+
+    def print_debug_info(self):
+        """
+        Print debug info of current DUT. Currently we will print debug info for expect failures.
+        """
+        Utility.console_log("DUT debug info for DUT: {}:".format(self.name), color="orange")
+
+        for failure in self.expect_failures:
+            Utility.console_log(u"\t[pattern]: {}\r\n\t[data]: {}\r\n\t[time]: {} - {}\r\n"
+                                .format(failure["pattern"], failure["data"],
+                                        self._format_ts(failure["start"]), self._format_ts(failure["end"])),
+                                color="orange")
+
 
 class SerialDUT(BaseDUT):
     """ serial with logging received data feature """
@@ -574,17 +694,14 @@ class SerialDUT(BaseDUT):
         self.serial_configs.update(kwargs)
         super(SerialDUT, self).__init__(name, port, log_file, app, **kwargs)
 
-    @staticmethod
-    def _format_data(data):
+    def _format_data(self, data):
         """
         format data for logging. do decode and add timestamp.
 
         :param data: raw data from read
         :return: formatted data (str)
         """
-        timestamp = time.time()
-        timestamp = "[{}:{}]".format(time.strftime("%m-%d %H:%M:%S", time.localtime(timestamp)),
-                                     str(timestamp % 1)[2:5])
+        timestamp = "[{}]".format(self._format_ts(time.time()))
         formatted_data = timestamp.encode() + b"\r\n" + data + b"\r\n"
         return formatted_data
 
@@ -597,8 +714,7 @@ class SerialDUT(BaseDUT):
     def _port_read(self, size=1):
         data = self.port_inst.read(size)
         if data:
-            with open(self.log_file, "ab+") as _log_file:
-                _log_file.write(self._format_data(data))
+            self._save_dut_log(self._format_data(data))
         return data
 
     def _port_write(self, data):

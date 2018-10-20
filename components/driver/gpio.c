@@ -91,9 +91,19 @@ esp_err_t gpio_set_intr_type(gpio_num_t gpio_num, gpio_int_type_t intr_type)
     return ESP_OK;
 }
 
+static void gpio_intr_status_clr(gpio_num_t gpio_num)
+{
+    if (gpio_num < 32) {
+        GPIO.status_w1tc = BIT(gpio_num);
+    } else {
+        GPIO.status1_w1tc.intr_st = BIT(gpio_num - 32);
+    }
+}
+
 static esp_err_t gpio_intr_enable_on_core (gpio_num_t gpio_num, uint32_t core_id)
 {
     GPIO_CHECK(GPIO_IS_VALID_GPIO(gpio_num), "GPIO number error", ESP_ERR_INVALID_ARG);
+    gpio_intr_status_clr(gpio_num);
     if (core_id == 0) {
         GPIO.pin[gpio_num].int_ena = GPIO_PRO_CPU_INTR_ENA;     //enable pro cpu intr
     } else {
@@ -111,6 +121,7 @@ esp_err_t gpio_intr_disable(gpio_num_t gpio_num)
 {
     GPIO_CHECK(GPIO_IS_VALID_GPIO(gpio_num), "GPIO number error", ESP_ERR_INVALID_ARG);
     GPIO.pin[gpio_num].int_ena = 0;                             //disable GPIO intr
+    gpio_intr_status_clr(gpio_num);
     return ESP_OK;
 }
 
@@ -249,7 +260,11 @@ esp_err_t gpio_config(const gpio_config_t *pGPIOConfig)
     }
     do {
         io_reg = GPIO_PIN_MUX_REG[io_num];
-        if (((gpio_pin_mask >> io_num) & BIT(0)) && io_reg) {
+        if (((gpio_pin_mask >> io_num) & BIT(0))) {
+            if (!io_reg) {
+                ESP_LOGE(GPIO_TAG, "IO%d is not a valid GPIO",io_num);
+                return ESP_ERR_INVALID_ARG;
+            }
             if(RTC_GPIO_IS_VALID_GPIO(io_num)){
                 rtc_gpio_deinit(io_num);
             }
@@ -301,7 +316,7 @@ esp_err_t gpio_reset_pin(gpio_num_t gpio_num)
 {
     assert(gpio_num >= 0 && GPIO_IS_VALID_GPIO(gpio_num));
     gpio_config_t cfg = {
-        .pin_bit_mask = BIT(gpio_num),
+        .pin_bit_mask = BIT64(gpio_num),
         .mode = GPIO_MODE_DISABLE,
         //for powersave reasons, the GPIO should not be floating, select pullup
         .pull_up_en = true,
@@ -408,16 +423,19 @@ esp_err_t gpio_isr_register(void (*fn)(void*), void * arg, int intr_alloc_flags,
     return esp_intr_alloc(ETS_GPIO_INTR_SOURCE, intr_alloc_flags, fn, arg, handle);
 }
 
-/*only level interrupt can be used for wake-up function*/
 esp_err_t gpio_wakeup_enable(gpio_num_t gpio_num, gpio_int_type_t intr_type)
 {
     GPIO_CHECK(GPIO_IS_VALID_GPIO(gpio_num), "GPIO number error", ESP_ERR_INVALID_ARG);
     esp_err_t ret = ESP_OK;
     if (( intr_type == GPIO_INTR_LOW_LEVEL ) || ( intr_type == GPIO_INTR_HIGH_LEVEL )) {
-        GPIO.pin[gpio_num].int_type = intr_type;
-        GPIO.pin[gpio_num].wakeup_enable = 0x1;
+        if (RTC_GPIO_IS_VALID_GPIO(gpio_num)) {
+            ret = rtc_gpio_wakeup_enable(gpio_num, intr_type);
+        } else {
+            GPIO.pin[gpio_num].int_type = intr_type;
+            GPIO.pin[gpio_num].wakeup_enable = 0x1;
+        }
     } else {
-        ESP_LOGE(GPIO_TAG, "GPIO wakeup only support Level mode,but edge mode set. gpio_num:%u", gpio_num);
+        ESP_LOGE(GPIO_TAG, "GPIO wakeup only supports level mode, but edge mode set. gpio_num:%u", gpio_num);
         ret = ESP_ERR_INVALID_ARG;
     }
     return ret;

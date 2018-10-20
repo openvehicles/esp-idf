@@ -59,7 +59,7 @@ Windows 用户
 
 	* 点击 “Providers” 选项卡。
 	
-		* 从 “Providers” 列表中选择 “CDT Cross GCC Built-in Compiler Settings”，将 “Command to get compiler specs” 修改为 ``xtensa-esp32-elf-gcc ${FLAGS} -E -P -v -dD "${INPUTS}"``
+		* 从 “Providers” 列表中选择 “CDT Cross GCC Built-in Compiler Settings”，将 “Command to get compiler specs” 修改为 ``xtensa-esp32-elf-gcc ${FLAGS} -std=c++11 -E -P -v -dD "${INPUTS}"``
 		
 		* 从 “Providers” 列表中选择 “CDT GCC Build Output Parser”，将 “Compiler command pattern” 修改为 ``xtensa-esp32-elf-(gcc|g\+\+|c\+\+|cc|cpp|clang)``
 
@@ -74,6 +74,10 @@ Windows 用户
 .. note::
 
     取消选中 “Allow heuristic resolution of includes”。因为启用此选项时，有时会导致 Eclipse 无法找到正确的头文件目录。
+
+点击 “C/C++ Build” -> “Behavior” 属性页。
+
+* 选中 “Enable parallel build” 以启用多任务并行构建。
 
 .. _eclipse-build-project:
 

@@ -1642,6 +1642,7 @@ typedef struct {
     UINT8 sec_level;
     BOOLEAN is_pair_cancel;
     BOOLEAN smp_over_br;
+    tSMP_AUTH_REQ auth_mode;
 } tBTM_LE_COMPLT;
 #endif
 
@@ -3417,8 +3418,7 @@ BOOLEAN BTM_SecAddDevice (BD_ADDR bd_addr, DEV_CLASS dev_class,
 **
 *******************************************************************************/
 //extern
-BOOLEAN BTM_SecDeleteDevice (BD_ADDR bd_addr);
-
+BOOLEAN BTM_SecDeleteDevice (BD_ADDR bd_addr, tBT_TRANSPORT transport);
 
 /*******************************************************************************
 **

@@ -22,6 +22,7 @@
 #include "btm_int.h"
 #include "stack/l2c_api.h"
 #include "smp_int.h"
+#include "p_256_ecc_pp.h"
 //#include "utils/include/bt_utils.h"
 
 #if SMP_INCLUDED == TRUE
@@ -550,6 +551,14 @@ void smp_proc_pair_cmd(tSMP_CB *p_cb, tSMP_INT_DATA *p_data)
                 smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
                 return;
             }
+            if(p_cb->accept_specified_sec_auth) {
+                if((p_cb->origin_loc_auth_req & p_cb->peer_auth_req & p_cb->loc_auth_req) != p_cb->origin_loc_auth_req ) {
+                    SMP_TRACE_ERROR("%s pairing failed - slave requires 0x%x auth but peer auth req 0x%x local auth req 0x%x",
+                                    __func__, p_cb->origin_loc_auth_req, p_cb->peer_auth_req, p_cb->loc_auth_req);
+                    reason = SMP_PAIR_AUTH_FAIL;
+                    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
+                }
+            }
 
             if (p_cb->selected_association_model == SMP_MODEL_SEC_CONN_OOB) {
                 if (smp_request_oob_data(p_cb)) {
@@ -570,6 +579,15 @@ void smp_proc_pair_cmd(tSMP_CB *p_cb, tSMP_INT_DATA *p_data)
             reason = SMP_PAIR_AUTH_FAIL;
             smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
             return;
+        }
+
+        if (p_cb->accept_specified_sec_auth) {
+            if ((p_cb->origin_loc_auth_req & p_cb->peer_auth_req & p_cb->loc_auth_req) != p_cb->origin_loc_auth_req ) {
+                SMP_TRACE_ERROR("%s pairing failed - master requires 0x%x auth but peer auth req 0x%x local auth req 0x%x",
+                                    __func__, p_cb->origin_loc_auth_req, p_cb->peer_auth_req, p_cb->loc_auth_req);
+                reason = SMP_PAIR_AUTH_FAIL;
+                smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
+            }
         }
 
         if (p_cb->selected_association_model == SMP_MODEL_SEC_CONN_OOB) {
@@ -668,6 +686,12 @@ void smp_process_pairing_public_key(tSMP_CB *p_cb, tSMP_INT_DATA *p_data)
 
     STREAM_TO_ARRAY(p_cb->peer_publ_key.x, p, BT_OCTET32_LEN);
     STREAM_TO_ARRAY(p_cb->peer_publ_key.y, p, BT_OCTET32_LEN);
+    /* In order to prevent the x and y coordinates of the public key from being modified, 
+       we need to check whether the x and y coordinates are on the given elliptic curve. */
+    if (!ECC_CheckPointIsInElliCur_P256((Point *)&p_cb->peer_publ_key)) {
+        SMP_TRACE_ERROR("%s, Invalid Public key.", __func__);
+        smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
+    }
     p_cb->flags |= SMP_PAIR_FLAG_HAVE_PEER_PUBL_KEY;
 
     smp_wait_for_both_public_keys(p_cb, NULL);
@@ -1831,7 +1855,7 @@ void smp_set_local_oob_random_commitment(tSMP_CB *p_cb, tSMP_INT_DATA *p_data)
 void smp_link_encrypted(BD_ADDR bda, UINT8 encr_enable)
 {
     tSMP_CB *p_cb = &smp_cb;
-
+    tBTM_SEC_DEV_REC  *p_dev_rec = btm_find_dev (bda);
     SMP_TRACE_DEBUG("%s encr_enable=%d\n", __func__, encr_enable);
 
     if (memcmp(&smp_cb.pairing_bda[0], bda, BD_ADDR_LEN) == 0) {
@@ -1842,6 +1866,18 @@ void smp_link_encrypted(BD_ADDR bda, UINT8 encr_enable)
             btm_ble_update_sec_key_size(bda, p_cb->loc_enc_size);
         }
 
+        smp_sm_event(&smp_cb, SMP_ENCRYPTED_EVT, &encr_enable);
+    } 
+    else if(p_dev_rec && !p_dev_rec->enc_init_by_we){ 
+
+        /* 
+        if enc_init_by_we is false, it means that client initiates encryption before slave calls esp_ble_set_encryption()
+        we need initiate pairing_bda and p_cb->role then encryption, for example iPhones
+        */
+        memcpy(&smp_cb.pairing_bda[0], bda, BD_ADDR_LEN);
+        p_cb->state = SMP_STATE_ENCRYPTION_PENDING;
+        p_cb->role = HCI_ROLE_SLAVE;
+        p_dev_rec->enc_init_by_we = FALSE;
         smp_sm_event(&smp_cb, SMP_ENCRYPTED_EVT, &encr_enable);
     }
 }

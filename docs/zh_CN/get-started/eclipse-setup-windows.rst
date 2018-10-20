@@ -50,7 +50,7 @@ Windows 平台上的 Eclipse 配置
 
 	* 选择 “Add...”，并在对应位置输入 ``BATCH_BUILD`` 和 ``1``。
 
-	* 再次点击 “Add...”，输入名称 ``IDF_PATH``，并填写 ESP-IDF 的完整安装路径。``IDF_PATH`` 目录路径应使用正斜杠，而非反斜线，例如 ``C:/Users/MyUser/Development/esp-idf``。
+	* 再次点击 “Add...”，输入名称 ``IDF_PATH``，并填写 ESP-IDF 的完整安装路径。``IDF_PATH`` 目录路径应使用正斜杠，而非反斜线，例如 ``C:/Users/user-name/Development/esp-idf``。
 
 	* 选择 PATH 环境变量，删除默认值，并将其替换为 ``C:\msys32\usr\bin;C:\msys32\mingw32\bin;C:\msys32\opt\xtensa-esp32-elf\bin`` （如果您已经将 msys32 安装到其他目​​录，这里请自行调整）。
 
@@ -59,7 +59,7 @@ Windows 平台上的 Eclipse 配置
 
 	* 点击 “Providers” 选项卡。
 	
-		* 从 “Providers” 列表中选择 “CDT Cross GCC Built-in Compiler Settings”，将 “Command to get compiler specs” 修改为 ``xtensa-esp32-elf-gcc ${FLAGS} -E -P -v -dD "${INPUTS}"``
+		* 从 “Providers” 列表中选择 “CDT Cross GCC Built-in Compiler Settings”，将 “Command to get compiler specs” 修改为 ``xtensa-esp32-elf-gcc ${FLAGS}  -std=c++11 -E -P -v -dD "${INPUTS}"``
 		
 		* 从 “Providers” 列表中选择 “CDT GCC Build Output Parser”，将 “Compiler command pattern” 修改为 ``xtensa-esp32-elf-(gcc|g\+\+|c\+\+|cc|cpp|clang)``
 
@@ -70,6 +70,12 @@ Windows 平台上的 Eclipse 配置
 .. note::
 
     取消选中 “Allow heuristic resolution of includes”。因为启用此选项时，有时会导致 Eclipse 无法找到正确的头文件目录。
+
+点击 “C/C++ Build” -> “Behavior” 属性页。
+
+* 选中 “Enable parallel build” 以启用多任务并行构建。
+
+* 将作业数设置为略高于“最佳”的推荐值，能够使得在 Windows 下的构建速度达到最快，不过这还要取决于您具体使用的硬件的配置。
 
 在 Eclipse IDE 中创建项目
 ---------------------------

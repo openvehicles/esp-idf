@@ -158,6 +158,21 @@ Although not directly related to formatting, here are a few notes about using co
     }
 
 
+Line Endings
+^^^^^^^^^^^^
+
+Commits should only contain files with LF (Unix style) endings.
+
+Windows users can configure git to check out CRLF (Windows style) endings locally and commit LF endings by setting the ``core.autocrlf`` setting. `Github has a document about setting this option <github-line-endings>`. However because MSYS2 uses Unix-style line endings, it is often easier to configure your text editor to use LF (Unix style) endings when editing ESP-IDF source files.
+
+If you accidentally have some commits in your branch that add LF endings, you can convert them to Unix by running this command in an MSYS2 or Unix terminal (change directory to the IDF working directory and check the correct branch is currently checked out, beforehand)::
+
+  git rebase --exec 'git diff-tree --no-commit-id --name-only -r HEAD | xargs dos2unix && git commit -a --amend --no-edit --allow-empty' master
+
+(Note that this line rebases on master, change the branch name at the end to rebase on another branch.)
+
+For updating a single commit, it's possible to run ``dos2unix FILENAME`` and then run ``git commit --amend``
+
 Formatting your code
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -169,6 +184,19 @@ To re-format a file, run::
 
     tools/format.sh components/my_component/file.c
 
+
+CMake Code Style
+----------------
+
+- Indent with four spaces.
+- Maximum line length 120 characters. When splitting lines, try to
+  focus on readability where possible (for example, by pairing up
+  keyword/argument pairs on individual lines).
+- Don't put anything in the optional parentheses after ``endforeach()``, ``endif()``, etc.
+- Use lowercase (``with_underscores``) for command, function, and macro names.
+- For locally scoped variables, use lowercase (``with_underscores``).
+- For globally scoped variables, use uppercase (``WITH_UNDERSCORES``).
+- Otherwise follow the defaults of the cmake-lint_ project.
 
 Configuring the code style for a project using EditorConfig
 -----------------------------------------------------------
@@ -207,3 +235,4 @@ Language features
 
 To be written.
 
+.. _cmake-lint: https://github.com/richq/cmake-lint

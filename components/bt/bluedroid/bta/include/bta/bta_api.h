@@ -636,6 +636,8 @@ typedef UINT8 tBTA_SIG_STRENGTH_MASK;
 #define BTA_DM_LE_FEATURES_READ         27      /* Cotroller specific LE features are read */
 #define BTA_DM_ENER_INFO_READ           28      /* Energy info read */
 #define BTA_DM_BLE_DEV_UNPAIRED_EVT     29      /* BLE unpair event */
+#define BTA_DM_SP_KEY_REQ_EVT           30      /* Simple Pairing Passkey request */
+
 typedef UINT8 tBTA_DM_SEC_EVT;
 
 /* Structure associated with BTA_DM_ENABLE_EVT */
@@ -763,6 +765,7 @@ typedef struct {
     UINT8           fail_reason;        /* The HCI reason/error code for when success=FALSE */
     tBLE_ADDR_TYPE  addr_type;          /* Peer device address type */
     tBT_DEVICE_TYPE dev_type;
+    UINT8           auth_mode;
 } tBTA_DM_AUTH_CMPL;
 
 
@@ -868,6 +871,13 @@ typedef struct {
     tBTA_AUTH_REQ   rmt_io_caps;    /* IO Capabilities of remote device */
 } tBTA_DM_SP_CFM_REQ;
 
+/* Structure associated with tBTA_DM_SP_KEY_REQ */
+typedef struct {
+    BD_ADDR         bd_addr;        /* peer address */
+    DEV_CLASS       dev_class;      /* peer CoD */
+    BD_NAME         bd_name;        /* peer device name */
+} tBTA_DM_SP_KEY_REQ;
+
 enum {
     BTA_SP_KEY_STARTED,         /* passkey entry started */
     BTA_SP_KEY_ENTERED,         /* passkey digit entered */
@@ -907,23 +917,24 @@ typedef struct {
 
 /* Union of all security callback structures */
 typedef union {
-    tBTA_DM_ENABLE      enable;         /* BTA enabled */
-    tBTA_DM_PIN_REQ     pin_req;        /* PIN request. */
-    tBTA_DM_AUTH_CMPL   auth_cmpl;      /* Authentication complete indication. */
-    tBTA_DM_AUTHORIZE   authorize;      /* Authorization request. */
-    tBTA_DM_LINK_UP     link_up;       /* ACL connection down event */
-    tBTA_DM_LINK_DOWN   link_down;       /* ACL connection down event */
-    tBTA_DM_BUSY_LEVEL  busy_level;     /* System busy level */
-    tBTA_DM_SP_CFM_REQ  cfm_req;        /* user confirm request */
-    tBTA_DM_SP_KEY_NOTIF key_notif;     /* passkey notification */
-    tBTA_DM_SP_RMT_OOB  rmt_oob;        /* remote oob */
-    tBTA_DM_BOND_CANCEL_CMPL bond_cancel_cmpl; /* Bond Cancel Complete indication */
-    tBTA_DM_SP_KEY_PRESS   key_press;   /* key press notification event */
-    tBTA_DM_ROLE_CHG     role_chg;       /* role change event */
-    tBTA_DM_BLE_SEC_REQ  ble_req;        /* BLE SMP related request */
-    tBTA_DM_BLE_KEY      ble_key;        /* BLE SMP keys used when pairing */
-    tBTA_BLE_LOCAL_ID_KEYS  ble_id_keys;  /* IR event */
-    BT_OCTET16              ble_er;       /* ER event data */
+    tBTA_DM_ENABLE              enable;             /* BTA enabled */
+    tBTA_DM_PIN_REQ             pin_req;            /* PIN request. */
+    tBTA_DM_AUTH_CMPL           auth_cmpl;          /* Authentication complete indication. */
+    tBTA_DM_AUTHORIZE           authorize;          /* Authorization request. */
+    tBTA_DM_LINK_UP             link_up;            /* ACL connection down event */
+    tBTA_DM_LINK_DOWN           link_down;          /* ACL connection down event */
+    tBTA_DM_BUSY_LEVEL          busy_level;         /* System busy level */
+    tBTA_DM_SP_CFM_REQ          cfm_req;            /* user confirm request */
+    tBTA_DM_SP_KEY_REQ          key_req;            /* user passkey request */
+    tBTA_DM_SP_KEY_NOTIF        key_notif;          /* passkey notification */
+    tBTA_DM_SP_RMT_OOB          rmt_oob;            /* remote oob */
+    tBTA_DM_BOND_CANCEL_CMPL    bond_cancel_cmpl;   /* Bond Cancel Complete indication */
+    tBTA_DM_SP_KEY_PRESS        key_press;          /* key press notification event */
+    tBTA_DM_ROLE_CHG            role_chg;           /* role change event */
+    tBTA_DM_BLE_SEC_REQ         ble_req;            /* BLE SMP related request */
+    tBTA_DM_BLE_KEY             ble_key;            /* BLE SMP keys used when pairing */
+    tBTA_BLE_LOCAL_ID_KEYS      ble_id_keys;        /* IR event */
+    BT_OCTET16                  ble_er;             /* ER event data */
 } tBTA_DM_SEC;
 
 /* Security callback */
@@ -1562,6 +1573,18 @@ extern void BTA_DmBondCancel(BD_ADDR bd_addr);
 
 /*******************************************************************************
 **
+** Function         BTA_DMSetPinType
+**
+** Description      This function sets pin type as BTM_PIN_TYPE_FIXED or BTM_PIN_TYPE_VARIABLE
+**
+**
+** Returns          void
+**
+*******************************************************************************/
+extern void BTA_DMSetPinType (UINT8 pin_type, UINT8 *pin_code, UINT8 pin_code_len);
+
+/*******************************************************************************
+**
 ** Function         BTA_DmPinReply
 **
 ** Description      This function provides a PIN when one is requested by DM
@@ -1601,6 +1624,18 @@ extern void BTA_DmLocalOob(void);
 **
 *******************************************************************************/
 extern void BTA_DmConfirm(BD_ADDR bd_addr, BOOLEAN accept);
+
+/*******************************************************************************
+**
+** Function         BTA_DmPasskeyReqReply
+**
+** Description      This function is called to provide the passkey for
+**                  Simple Pairing in response to BTA_DM_SP_KEY_REQ_EVT
+**
+** Returns          void
+**
+*******************************************************************************/
+extern void BTA_DmPasskeyReqReply(BOOLEAN accept, BD_ADDR bd_addr, UINT32 passkey);
 
 /*******************************************************************************
 **
@@ -1789,6 +1824,22 @@ extern void BTA_DmBleSetBgConnType(tBTA_DM_BLE_CONN_TYPE bg_conn_type, tBTA_DM_B
 **
 *******************************************************************************/
 extern void BTA_DmBlePasskeyReply(BD_ADDR bd_addr, BOOLEAN accept, UINT32 passkey);
+
+/*******************************************************************************
+**
+** Function         BTA_DmBleSetStaticPasskey
+**
+** Description      Set BLE SMP static passkey.
+**
+** Parameters:      add              - add static passkey when add is true
+**                                     clear static passkey when add is false
+**                  passkey          - static passkey value
+**
+**
+** Returns          void
+**
+*******************************************************************************/
+extern void BTA_DmBleSetStaticPasskey(bool add, uint32_t passkey);
 
 /*******************************************************************************
 **
@@ -2071,6 +2122,7 @@ extern void BTA_DmBleScan(BOOLEAN start, UINT32 duration,
 extern void BTA_DmBleStopAdvertising(void);
 
 extern void BTA_DmSetRandAddress(BD_ADDR rand_addr, tBTA_SET_RAND_ADDR_CBACK *p_set_rand_addr_cback);
+extern void BTA_DmClearRandAddress(void);
 
 #endif
 

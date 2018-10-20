@@ -4,6 +4,7 @@ stages:
   - host_test
   - unit_test
   - integration_test
+  - check
   - deploy
 
 variables:
@@ -31,6 +32,9 @@ variables:
   APPLY_BOT_FILTER_SCRIPT: "$CI_PROJECT_DIR/tools/ci/apply_bot_filter.py"
   CHECKOUT_REF_SCRIPT: "$CI_PROJECT_DIR/tools/ci/checkout_project_ref.py"
 
+# Docker images
+  BOT_DOCKER_IMAGE_TAG: ":latest"
+
 # When 'fetch' strategy is used, Gitlab removes untracked files before checking out
 # new revision. However if the new revision doesn't include some of the submodules
 # which were present in the old revision, such submodule directories would not be
@@ -38,10 +42,10 @@ variables:
 # are removed.
 .git_clean_stale_submodules:  &git_clean_stale_submodules >
   find . -name '.git' -not -path './.git' -printf '%P\n'
-  | sed 's|/.git||' 
+  | sed 's|/.git||'
   | xargs -I {} sh -c '
-  grep -q {} .gitmodules 
-  ||  (echo "Removing {}, has .git directory but not in .gitmodules file" 
+  grep -q {} .gitmodules
+  ||  (echo "Removing {}, has .git directory but not in .gitmodules file"
   && rm -rf {});'
 
 # before each job, we need to check if this job is filtered by bot stage/job filter
@@ -68,6 +72,12 @@ before_script:
   # fetch the submodules (& if necessary re-fetch repo) from gitlab
   - time ./tools/ci/get-full-sources.sh
 
+# used for check scripts which we want to run unconditionally
+.do_nothing_before_no_filter:
+  before_script: &do_nothing_before_no_filter
+    - *git_clean_stale_submodules
+
+# used for everything else where we want to do no prep, except for bot filter
 .do_nothing_before:
   before_script: &do_nothing_before
     - *git_clean_stale_submodules
@@ -132,7 +142,7 @@ build_template_app:
   artifacts:
     paths:
       - SSC/ssc_bin
-    expire_in: 1 mos
+    expire_in: 1 week
   variables:
     SSC_CONFIG_FOLDER: "$CI_PROJECT_DIR/SSC/configs/ESP32_IDF"
   script:
@@ -160,7 +170,7 @@ build_esp_idf_tests:
       - tools/unit-test-app/output
       - components/idf_test/unit_test/TestCaseAll.yml
       - components/idf_test/unit_test/CIConfigs/*.yml
-    expire_in: 1 mos
+    expire_in: 2 days
   script:
     - cd tools/unit-test-app
     - MAKEFLAGS= make help # make sure kconfig tools are built in single process
@@ -170,7 +180,7 @@ build_esp_idf_tests:
     - make ut-build-all-configs
     - python tools/UnitTestParser.py
 
-.build_examples_template: &build_examples_template
+.build_examples_make_template: &build_examples_make_template
   <<: *build_template
   retry: 1
   artifacts:
@@ -182,10 +192,10 @@ build_esp_idf_tests:
       - build_examples/*/*/*/build/download.config
       - build_examples/*/*/*/build/bootloader/*.bin
       - $LOG_PATH
-    expire_in: 1 week
+    expire_in: 2 days
   variables:
     IDF_CI_BUILD: "1"
-    LOG_PATH: "$CI_PROJECT_DIR/log_examples"
+    LOG_PATH: "$CI_PROJECT_DIR/log_examples_make"
   script:
     # it's not possible to build 100% out-of-tree and have the "artifacts"
     # mechanism work, but this is the next best thing
@@ -196,29 +206,80 @@ build_esp_idf_tests:
     - mkdir -p ${LOG_PATH}
     - ${IDF_PATH}/tools/ci/build_examples.sh "${CI_JOB_NAME}"
 
-build_examples_00:
-  <<: *build_examples_template
+# same as above, but for CMake
+.build_examples_cmake_template: &build_examples_cmake_template
+  <<: *build_template
+  retry: 1
+  artifacts:
+    when: always
+    paths:
+      - build_examples_cmake/*/*/*/build/*.bin
+      - build_examples_cmake/*/*/*/build/*.elf
+      - build_examples_cmake/*/*/*/build/*.map
+      - build_examples_cmake/*/*/*/build/download.config
+      - build_examples_cmake/*/*/*/build/bootloader/*.bin
+      - $LOG_PATH
+    expire_in: 2 days
+  variables:
+    IDF_CI_BUILD: "1"
+    LOG_PATH: "$CI_PROJECT_DIR/log_examples_cmake"
+  script:
+    # it's not possible to build 100% out-of-tree and have the "artifacts"
+    # mechanism work, but this is the next best thing
+    - rm -rf build_examples_cmake
+    - mkdir build_examples_cmake
+    - cd build_examples_cmake
+    # build some of examples
+    - mkdir -p ${LOG_PATH}
+    - ${IDF_PATH}/tools/ci/build_examples_cmake.sh "${CI_JOB_NAME}"
 
-build_examples_01:
-  <<: *build_examples_template
+build_examples_make_00:
+  <<: *build_examples_make_template
 
-build_examples_02:
-  <<: *build_examples_template
+build_examples_make_01:
+  <<: *build_examples_make_template
 
-build_examples_03:
-  <<: *build_examples_template
+build_examples_make_02:
+  <<: *build_examples_make_template
 
-build_examples_04:
-  <<: *build_examples_template
+build_examples_make_03:
+  <<: *build_examples_make_template
 
-build_examples_05:
-  <<: *build_examples_template
+build_examples_make_04:
+  <<: *build_examples_make_template
 
-build_examples_06:
-  <<: *build_examples_template
+build_examples_make_05:
+  <<: *build_examples_make_template
 
-build_examples_07:
-  <<: *build_examples_template
+build_examples_make_06:
+  <<: *build_examples_make_template
+
+build_examples_make_07:
+  <<: *build_examples_make_template
+
+build_examples_cmake_00:
+  <<: *build_examples_cmake_template
+
+build_examples_cmake_01:
+  <<: *build_examples_cmake_template
+
+build_examples_cmake_02:
+  <<: *build_examples_cmake_template
+
+build_examples_cmake_03:
+  <<: *build_examples_cmake_template
+
+build_examples_cmake_04:
+  <<: *build_examples_cmake_template
+
+build_examples_cmake_05:
+  <<: *build_examples_cmake_template
+
+build_examples_cmake_06:
+  <<: *build_examples_cmake_template
+
+build_examples_cmake_07:
+  <<: *build_examples_cmake_template
 
 # If you want to add new build example jobs, please add it into dependencies of `.example_test_template`
 
@@ -235,23 +296,30 @@ build_docs:
       - docs/en/sphinx-warning-log.txt
       - docs/en/sphinx-warning-log-sanitized.txt
       - docs/en/_build/html
+      - docs/sphinx-err-*
       # Chinese version of documentation
       - docs/zh_CN/doxygen-warning-log.txt
       - docs/zh_CN/sphinx-warning-log.txt
       - docs/zh_CN/sphinx-warning-log-sanitized.txt
       - docs/zh_CN/_build/html
-    expire_in: 1 mos
+    expire_in: 1 day
   script:
     - cd docs
     - ./check_lang_folder_sync.sh
     - cd en
     - make gh-linkcheck
-    - make html
+    - make html || cat /tmp/sphinx-err*.log
     - ../check_doc_warnings.sh
     - cd ../zh_CN
     - make gh-linkcheck
     - make html
     - ../check_doc_warnings.sh
+
+verify_cmake_style:
+  stage: build
+  image: $CI_DOCKER_REGISTRY/esp32-ci-env$BOT_DOCKER_IMAGE_TAG
+  script:
+    tools/cmake/run_cmake_lint.sh
 
 .host_test_template: &host_test_template
   stage: host_test
@@ -259,7 +327,7 @@ build_docs:
   tags:
     - host_test
   dependencies: []
-    
+
 test_nvs_on_host:
   <<: *host_test_template
   script:
@@ -271,6 +339,7 @@ test_nvs_coverage:
   artifacts:
     paths:
       - components/nvs_flash/test_nvs_host/coverage_report
+    expire_in: 1 week
   only:
     - triggers
   # This job takes a few hours to finish, so only run it on demand
@@ -286,29 +355,77 @@ test_partition_table_on_host:
     - build
   script:
     - cd components/partition_table/test_gen_esp32part_host
-    - ./gen_esp32part_tests.py
+    - ${IDF_PATH}/tools/ci/multirun_with_pyenv.sh ./gen_esp32part_tests.py
 
 test_wl_on_host:
   <<: *host_test_template
   artifacts:
     paths:
       - components/wear_levelling/test_wl_host/coverage_report.zip
+    expire_in: 1 week
   script:
     - cd components/wear_levelling/test_wl_host
     - make test
 
 test_fatfs_on_host:
   <<: *host_test_template
-  tags:
-    - wl_host_test
   script:
     - cd components/fatfs/test_fatfs_host/
     - make test
 
+.host_fuzzer_test_template: &host_fuzzer_test_template
+  stage: host_test
+  image: $CI_DOCKER_REGISTRY/afl-fuzzer-test
+  tags:
+    - host_test
+  dependencies: []
+  artifacts:
+    when: always
+    paths:
+      - ${FUZZER_TEST_DIR}/out/crashes
+      - ${FUZZER_TEST_DIR}/fuzz_output.log
+    expire_in: 1 week
+  only:
+    # can only be triggered
+    - triggers
+  script:
+    - export AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1 && export AFL_SKIP_CPUFREQ=1
+    - cd ${FUZZER_TEST_DIR}
+    # run AFL fuzzer for one hour
+    - ( ( make ${FUZZER_PARAMS} fuzz | tee fuzz_output.log | grep -v '\(Fuzzing test case\|Entering queue cycle\)' ) || pkill sleep ) &
+    - ( sleep 3600 || mkdir -p out/crashes/env_failed ) && pkill afl-fuz
+    # check no crashes found
+    - test -z "$(ls out/crashes/)" || exit 1
+
+test_mdns_fuzzer_on_host:
+  <<: *host_fuzzer_test_template
+  variables:
+    BOT_NEEDS_TRIGGER_BY_NAME: 1
+    FUZZER_TEST_DIR: components/mdns/test_afl_fuzz_host
+
+test_lwip_dns_fuzzer_on_host:
+  <<: *host_fuzzer_test_template
+  variables:
+    BOT_NEEDS_TRIGGER_BY_NAME: 1
+    FUZZER_TEST_DIR: components/lwip/test_afl_host
+    FUZZER_PARAMS: MODE=dns
+
+test_lwip_dhcp_fuzzer_on_host:
+  <<: *host_fuzzer_test_template
+  variables:
+    BOT_NEEDS_TRIGGER_BY_NAME: 1
+    FUZZER_TEST_DIR: components/lwip/test_afl_host
+    FUZZER_PARAMS: MODE=dhcp_client
+
+test_lwip_dhcps_fuzzer_on_host:
+  <<: *host_fuzzer_test_template
+  variables:
+    BOT_NEEDS_TRIGGER_BY_NAME: 1
+    FUZZER_TEST_DIR: components/lwip/test_afl_host
+    FUZZER_PARAMS: MODE=dhcp_server
+
 test_spiffs_on_host:
   <<: *host_test_template
-  tags:
-    - wl_host_test
   script:
     - cd components/spiffs/test_spiffs_host/
     - make test
@@ -319,6 +436,12 @@ test_multi_heap_on_host:
     - cd components/heap/test_multi_heap_host
     - ./test_all_configs.sh
 
+test_confserver:
+  <<: *host_test_template
+  script:
+    - cd tools/kconfig_new/test
+    - ${IDF_PATH}/tools/ci/multirun_with_pyenv.sh ./test_confserver.py
+
 test_build_system:
   <<: *host_test_template
   script:
@@ -328,14 +451,65 @@ test_build_system:
     - cd test_build_system
     - ${IDF_PATH}/tools/ci/test_build_system.sh
 
-test_esp_err_to_name_on_host:
+test_build_system_cmake:
   <<: *host_test_template
   script:
-    - cd tools/
-    - ./gen_esp_err_to_name.py
-    - git diff --exit-code -- ../components/esp32/esp_err_to_name.c || (echo 'Differences found. Please run gen_esp_err_to_name.py and commit the changes.'; exit 1)
+    - ${IDF_PATH}/tools/ci/test_configure_ci_environment.sh
+    - rm -rf test_build_system
+    - mkdir test_build_system
+    - cd test_build_system
+    - ${IDF_PATH}/tools/ci/test_build_system_cmake.sh
 
-push_master_to_github:
+test_idf_monitor:
+  <<: *host_test_template
+  artifacts:
+    when: on_failure
+    paths:
+      - tools/test_idf_monitor/outputs/*
+    expire_in: 1 week
+  script:
+    - cd ${IDF_PATH}/tools/test_idf_monitor
+    - ${IDF_PATH}/tools/ci/multirun_with_pyenv.sh ./run_test_idf_monitor.py
+
+test_idf_size:
+  <<: *host_test_template
+  artifacts:
+    when: on_failure
+    paths:
+      - tools/test_idf_size/output
+      - tools/test_idf_size/.coverage
+    expire_in: 1 week
+  script:
+    - cd ${IDF_PATH}/tools/test_idf_size
+    - ${IDF_PATH}/tools/ci/multirun_with_pyenv.sh ./test.sh
+
+test_esp_err_to_name_on_host:
+  <<: *host_test_template
+  artifacts:
+    when: on_failure
+    paths:
+      - components/esp32/esp_err_to_name.c
+    expire_in: 1 week
+  script:
+    - cd ${IDF_PATH}/tools/
+    - ${IDF_PATH}/tools/ci/multirun_with_pyenv.sh -p 2.7.15 ./gen_esp_err_to_name.py
+    - git diff --exit-code -- ../components/esp32/esp_err_to_name.c || (echo 'Differences found. Please run gen_esp_err_to_name.py and commit the changes.'; exit 1)
+    - ${IDF_PATH}/tools/ci/multirun_with_pyenv.sh -p 3.4.8 ./gen_esp_err_to_name.py
+    - git diff --exit-code -- ../components/esp32/esp_err_to_name.c || (echo 'Differences found between running under Python 2 and 3.'; exit 1)
+
+test_espcoredump:
+  <<: *host_test_template
+  artifacts:
+    when: always
+    paths:
+      - components/espcoredump/test/.coverage
+      - components/espcoredump/test/output
+    expire_in: 1 week
+  script:
+    - cd components/espcoredump/test/
+    - ${IDF_PATH}/tools/ci/multirun_with_pyenv.sh ./test_espcoredump.sh
+
+push_to_github:
   stage: deploy
   image: $CI_DOCKER_REGISTRY/esp32-ci-env$BOT_DOCKER_IMAGE_TAG
   tags:
@@ -346,8 +520,6 @@ push_master_to_github:
     - /^v\d+\.\d+(\.\d+)?($|-)/
   when: on_success
   dependencies: []
-  variables:
-    GITHUB_PUSH_REFS: refs/remotes/origin/release refs/remotes/origin/master
   before_script: *do_nothing_before
   script:
     - mkdir -p ~/.ssh
@@ -358,12 +530,7 @@ push_master_to_github:
     - echo -e "Host github.com\n\tStrictHostKeyChecking no\n" >> ~/.ssh/config
     - git remote remove github &>/dev/null || true
     - git remote add github git@github.com:espressif/esp-idf.git
-    # What the next line of script does: goes through the list of refs for all branches we push to github,
-    # generates a snippet of shell which is evaluated. The snippet checks CI_COMMIT_SHA against the SHA
-    # (aka objectname) at tip of each branch, and if any SHAs match then it checks out the local branch
-    # and then pushes that ref to a corresponding github branch
-    - eval $(git for-each-ref --shell bash --format 'if [ $CI_COMMIT_SHA == %(objectname) ]; then git checkout -B %(refname:strip=3); git push --follow-tags github %(refname:strip=3); fi;' $GITHUB_PUSH_REFS)
-
+    - tools/ci/push_to_github.sh
 
 deploy_docs:
   stage: host_test
@@ -411,7 +578,7 @@ check_doc_links:
   artifacts:
     paths:
       - docs/_build/linkcheck
-    expire_in: 1 mos
+    expire_in: 1 week
   script:
     # must be triggered with CHECK_LINKS=Yes, otherwise exit without test
     - test "$CHECK_LINKS" = "Yes" || exit 0
@@ -420,17 +587,21 @@ check_doc_links:
     - cd docs
     - make linkcheck
 
-check_commit_msg:
-  stage: deploy
+.check_job_template: &check_job_template
+  stage: check
   image: $CI_DOCKER_REGISTRY/esp32-ci-env$BOT_DOCKER_IMAGE_TAG
   tags:
     - build
-  except:
-    - master
-    - /^release\/v/
-    - /^v\d+\.\d+(\.\d+)?($|-)/
   dependencies: []
-  before_script: *do_nothing_before
+  before_script: *do_nothing_before_no_filter
+
+check_line_endings:
+  <<: *check_job_template
+  script:
+    - tools/ci/check-line-endings.sh ${IDF_PATH}
+
+check_commit_msg:
+  <<: *check_job_template
   script:
     - git status
     - git log -n10 --oneline
@@ -438,35 +609,33 @@ check_commit_msg:
     - 'git log --pretty=%s master.. -- | grep "^WIP: " && exit 1 || exit 0'
 
 check_permissions:
-  stage: deploy
-  image: $CI_DOCKER_REGISTRY/esp32-ci-env$BOT_DOCKER_IMAGE_TAG
-  tags:
-    - build
-  except:
-    - master
-    - /^release\/v/
-    - /^v\d+\.\d+(\.\d+)?($|-)/
-  dependencies: []
-  before_script: *do_nothing_before
+  <<: *check_job_template
   script:
     - tools/ci/check-executable.sh
 
-check_submodule_sync:
-  stage: deploy
-  image: $CI_DOCKER_REGISTRY/esp32-ci-env$BOT_DOCKER_IMAGE_TAG
-  tags:
-    - build
+check_examples_cmake_make:
+  <<: *check_job_template
   except:
     - master
     - /^release\/v/
     - /^v\d+\.\d+(\.\d+)?($|-)/
-  dependencies: []
+  before_script: *do_nothing_before
+  script:
+    - tools/ci/check_examples_cmake_make.sh
+
+check_submodule_sync:
+  <<: *check_job_template
   variables:
     GIT_STRATEGY: clone
-  before_script: *do_nothing_before
   script:
     # check if all submodules are correctly synced to public repostory
     - git submodule update --init --recursive
+
+check_artifacts_expire_time:
+  <<: *check_job_template
+  script:
+    # check if we have set expire time for all artifacts
+    - python tools/ci/check_artifacts_expire_time.py
 
 assign_test:
   tags:
@@ -488,7 +657,7 @@ assign_test:
       - components/idf_test/*/CIConfigs
       - components/idf_test/*/TC.sqlite
       - $EXAMPLE_CONFIG_OUTPUT_PATH
-    expire_in: 1 mos
+    expire_in: 1 week
   before_script: *add_gitlab_key_before
   script:
     # assign example tests
@@ -513,19 +682,27 @@ assign_test:
     - schedules
   dependencies:
     - assign_test
-    - build_examples_00
-    - build_examples_01
-    - build_examples_02
-    - build_examples_03
-    - build_examples_04
-    - build_examples_05
-    - build_examples_06
-    - build_examples_07
+    - build_examples_make_00
+    - build_examples_make_01
+    - build_examples_make_02
+    - build_examples_make_03
+    - build_examples_make_04
+    - build_examples_make_05
+    - build_examples_make_06
+    - build_examples_make_07
+    - build_examples_cmake_00
+    - build_examples_cmake_01
+    - build_examples_cmake_02
+    - build_examples_cmake_03
+    - build_examples_cmake_04
+    - build_examples_cmake_05
+    - build_examples_cmake_06
+    - build_examples_cmake_07
   artifacts:
     when: always
     paths:
       - $LOG_PATH
-    expire_in: 1 mos
+    expire_in: 1 week
   variables:
     TEST_FW_PATH: "$CI_PROJECT_DIR/tools/tiny-test-fw"
     TEST_CASE_PATH: "$CI_PROJECT_DIR/examples"
@@ -574,7 +751,7 @@ assign_test:
     when: always
     paths:
       - $LOG_PATH
-    expire_in: 1 mos
+    expire_in: 1 week
   variables:
     LOCAL_ENV_CONFIG_PATH: "$CI_PROJECT_DIR/ci-test-runner-configs/$CI_RUNNER_DESCRIPTION/ESP32_IDF"
     LOG_PATH: "$CI_PROJECT_DIR/$CI_COMMIT_SHA"
@@ -629,6 +806,7 @@ example_test_001_01:
 
 example_test_002_01:
   <<: *example_test_template
+  image: $CI_DOCKER_REGISTRY/ubuntu-test-env$BOT_DOCKER_IMAGE_TAG
   tags:
     - ESP32
     - Example_ShieldBox
@@ -638,6 +816,18 @@ example_test_003_01:
   tags:
     - ESP32
     - Example_SDIO
+
+example_test_004_01:
+  <<: *example_test_template
+  tags:
+    - ESP32
+    - Example_CAN
+
+example_test_005_01:
+  <<: *example_test_template
+  tags:
+    - ESP32
+    - Example_WIFI_BT
 
 UT_001_01:
   <<: *unit_test_template
@@ -788,7 +978,7 @@ UT_001_25:
   tags:
     - ESP32_IDF
     - UT_T1_1
-    
+
 UT_001_26:
   <<: *unit_test_template
   tags:
@@ -824,7 +1014,7 @@ UT_001_31:
   tags:
     - ESP32_IDF
     - UT_T1_1
-    
+
 UT_001_32:
   <<: *unit_test_template
   tags:
@@ -836,13 +1026,25 @@ UT_001_33:
   tags:
     - ESP32_IDF
     - UT_T1_1
-    
+
 UT_001_34:
   <<: *unit_test_template
   tags:
     - ESP32_IDF
     - UT_T1_1
 
+UT_001_35:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T1_1
+
+UT_001_36:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T1_1
+    
 UT_002_01:
   <<: *unit_test_template
   tags:
@@ -947,9 +1149,23 @@ UT_004_10:
   tags:
     - ESP32_IDF
     - UT_T1_1
-    - psram
-    
+    - psram    
+
 UT_004_11:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T1_1
+    - psram
+
+UT_004_12:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T1_1
+    - psram
+
+UT_004_13:
   <<: *unit_test_template
   tags:
     - ESP32_IDF
@@ -964,6 +1180,13 @@ UT_005_01:
     - psram
 
 UT_005_02:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T1_SPIMODE
+    - psram
+
+UT_005_03:
   <<: *unit_test_template
   tags:
     - ESP32_IDF
@@ -1044,6 +1267,31 @@ UT_008_04:
     - ESP32_IDF
     - UT_T1_LEDC
     - psram
+    
+UT_009_01:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T2_RS485
+
+UT_009_02:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T2_RS485
+    
+UT_009_03:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T2_RS485
+
+UT_009_04:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T2_RS485
+    - psram
 
 UT_010_01:
   <<: *unit_test_template
@@ -1070,59 +1318,68 @@ UT_010_04:
     - UT_T1_RMT
     - psram
 
+UT_011_01:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - EMMC
+
+UT_011_02:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - EMMC
+
+UT_011_03:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - EMMC
+
+UT_012_01:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T1_1
+    - 8Mpsram
+
+UT_012_02:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T1_1
+    - 8Mpsram
+
+UT_012_03:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T1_1
+    - 8Mpsram
+
+UT_601_01:
+  <<: *unit_test_template
+  tags:
+    - ESP32_IDF
+    - UT_T1_1
+
 IT_001_01:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T1_1
+    - SSC_T1_4
 
 IT_001_02:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T1_1
+    - SSC_T1_4
 
 IT_001_03:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T1_1
-
-IT_001_04:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T1_1
-
-IT_001_05:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T1_1
-
-IT_001_06:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T1_1
-
-IT_001_07:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T1_1
-
-IT_001_08:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T1_1
-
-IT_001_09:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T1_1
+    - SSC_T1_4
 
 IT_002_01:
   <<: *test_template
@@ -1134,85 +1391,79 @@ IT_003_01:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_02:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_03:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_04:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_05:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_06:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_07:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_08:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_09:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_10:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_11:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_12:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_003_13:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
-
-IT_003_14:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T2_1
+    - SSC_T2_5
 
 IT_004_01:
   <<: *test_template
@@ -1224,7 +1475,61 @@ IT_005_01:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T1_WEP
+    - SSC_T1_5
+
+IT_005_02:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T1_5
+
+IT_006_01:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T1_6
+
+IT_006_02:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T1_6
+
+IT_006_03:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T1_6
+
+IT_006_04:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T1_6
+
+IT_006_05:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T1_6
+
+IT_007_01:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T1_7
+
+IT_007_02:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T1_7
+
+IT_008_01:
+  <<: *test_template
+  tags:
+    - ESP32_IDF
+    - SSC_T1_8
 
 IT_009_01:
   <<: *test_template
@@ -1244,58 +1549,32 @@ IT_011_01:
     - ESP32_IDF
     - SSC_T50_1
 
-IT_501_01:
+IT_012_01:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T1_1
-    - stress_test
+    - SSC_T1_9
 
-IT_501_02:
+IT_013_01:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T1_1
-    - stress_test
+    - SSC_T2_2
 
-IT_501_03:
+IT_013_02:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T1_1
-    - stress_test
+    - SSC_T2_2
 
-IT_502_01:
+IT_014_01:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
-    - stress_test
+    - SSC_T2_3
 
-IT_502_02:
+IT_015_01:
   <<: *test_template
   tags:
     - ESP32_IDF
-    - SSC_T2_1
-    - stress_test
-
-IT_503_01:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T5_1
-    - stress_test
-
-IT_503_02:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T5_1
-    - stress_test
-
-IT_503_03:
-  <<: *test_template
-  tags:
-    - ESP32_IDF
-    - SSC_T5_1
-    - stress_test
+    - SSC_T2_4
