@@ -30,6 +30,7 @@ typedef enum {
     BTC_GAP_BLE_ACT_UPDATE_CONN_PARAM,
     BTC_GAP_BLE_ACT_SET_PKT_DATA_LEN,
     BTC_GAP_BLE_ACT_SET_RAND_ADDRESS,
+    BTC_GAP_BLE_ACT_CLEAR_RAND_ADDRESS,
     BTC_GAP_BLE_ACT_CONFIG_LOCAL_PRIVACY,
     BTC_GAP_BLE_ACT_CONFIG_LOCAL_ICON,
     BTC_GAP_BLE_ACT_UPDATE_WHITE_LIST,
@@ -166,5 +167,7 @@ void btc_gap_ble_cb_deep_free(btc_msg_t *msg);
 void btc_gap_ble_cb_deep_copy(btc_msg_t *msg, void *p_dest, void *p_src);
 void btc_gap_callback_init(void);
 void btc_gap_ble_deinit(void);
+void btc_adv_list_init(void);
+void btc_adv_list_deinit(void);
 
 #endif /* __BTC_GAP_BLE_H__ */

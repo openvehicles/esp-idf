@@ -31,6 +31,7 @@
 #include "driver/periph_ctrl.h"
 #include "esp_heap_caps.h"
 #include "driver/spi_common.h"
+#include "stdatomic.h"
 
 static const char *SPI_TAG = "spi";
 
@@ -50,7 +51,7 @@ typedef struct spi_device_t spi_device_t;
 #define DMA_CHANNEL_ENABLED(dma_chan)    (BIT(dma_chan-1))
 
 //Periph 1 is 'claimed' by SPI flash code.
-static bool spi_periph_claimed[3] = {true, false, false};
+static atomic_bool spi_periph_claimed[3] = { ATOMIC_VAR_INIT(true), ATOMIC_VAR_INIT(false), ATOMIC_VAR_INIT(false)};
 static uint8_t spi_dma_chan_enabled = 0;
 static portMUX_TYPE spi_dma_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
@@ -58,7 +59,8 @@ static portMUX_TYPE spi_dma_spinlock = portMUX_INITIALIZER_UNLOCKED;
 //Returns true if this peripheral is successfully claimed, false if otherwise.
 bool spicommon_periph_claim(spi_host_device_t host)
 {
-    bool ret = __sync_bool_compare_and_swap(&spi_periph_claimed[host], false, true);
+    bool false_var = false;
+    bool ret = atomic_compare_exchange_strong(&spi_periph_claimed[host], &false_var, true);
     if (ret) periph_module_enable(spi_periph_signal[host].module);
     return ret;
 }
@@ -66,7 +68,8 @@ bool spicommon_periph_claim(spi_host_device_t host)
 //Returns true if this peripheral is successfully freed, false if otherwise.
 bool spicommon_periph_free(spi_host_device_t host)
 {
-    bool ret = __sync_bool_compare_and_swap(&spi_periph_claimed[host], true, false);
+    bool true_var = true;
+    bool ret = atomic_compare_exchange_strong(&spi_periph_claimed[host], &true_var, false);
     if (ret) periph_module_disable(spi_periph_signal[host].module);
     return ret;
 }
@@ -309,6 +312,7 @@ void spicommon_cs_initialize(spi_host_device_t host, int cs_io_num, int cs_num, 
         gpio_iomux_out(cs_io_num, FUNC_SPI, false);
     } else {
         //Use GPIO matrix
+        gpio_set_direction(cs_io_num, GPIO_MODE_INPUT_OUTPUT);
         gpio_matrix_out(cs_io_num, spi_periph_signal[host].spics_out[cs_num], false, false);
         if (cs_num == 0) gpio_matrix_in(cs_io_num, spi_periph_signal[host].spics_in, false);
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[cs_io_num], FUNC_GPIO);
@@ -330,7 +334,7 @@ void spicommon_cs_free_io(int cs_gpio_num)
 }
 
 //Set up a list of dma descriptors. dmadesc is an array of descriptors. Data is the buffer to point to.
-void spicommon_setup_dma_desc_links(lldesc_t *dmadesc, int len, const uint8_t *data, bool isrx)
+void IRAM_ATTR spicommon_setup_dma_desc_links(lldesc_t *dmadesc, int len, const uint8_t *data, bool isrx)
 {
     int n = 0;
     while (len) {

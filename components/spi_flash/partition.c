@@ -24,7 +24,9 @@
 #include "esp_partition.h"
 #include "esp_flash_encrypt.h"
 #include "esp_log.h"
+#include "bootloader_common.h"
 
+#define HASH_LEN 32 /* SHA-256 digest length */
 
 #ifndef NDEBUG
 // Enable built-in checks in queue.h in debug builds
@@ -169,7 +171,8 @@ static esp_err_t load_partitions()
         item->info.encrypted = it->flags & PART_FLAG_ENCRYPTED;
         if (esp_flash_encryption_enabled() && (
                 it->type == PART_TYPE_APP
-                || (it->type == PART_TYPE_DATA && it->subtype == PART_SUBTYPE_DATA_OTA))) {
+                || (it->type == PART_TYPE_DATA && it->subtype == PART_SUBTYPE_DATA_OTA)
+                || (it->type == PART_TYPE_DATA && it->subtype == PART_SUBTYPE_DATA_NVS_KEYS))) {
             /* If encryption is turned on, all app partitions and OTA data
                are always encrypted */
             item->info.encrypted = true;
@@ -321,4 +324,24 @@ esp_err_t esp_partition_mmap(const esp_partition_t* partition, uint32_t offset, 
         *out_ptr = (void*) (((ptrdiff_t) *out_ptr) + region_offset);
     }
     return rc;
+}
+
+esp_err_t esp_partition_get_sha256(const esp_partition_t *partition, uint8_t *sha_256)
+{
+    return bootloader_common_get_sha256_of_partition(partition->address, partition->size, partition->type, sha_256);
+}
+
+bool esp_partition_check_identity(const esp_partition_t *partition_1, const esp_partition_t *partition_2)
+{
+    uint8_t sha_256[2][HASH_LEN] = { 0 };
+
+    if (esp_partition_get_sha256(partition_1, sha_256[0]) == ESP_OK &&
+        esp_partition_get_sha256(partition_2, sha_256[1]) == ESP_OK) {
+
+        if (memcmp(sha_256[0], sha_256[1], HASH_LEN) == 0) {
+            // The partitions are identity
+            return true;
+        }
+    }
+    return false;
 }

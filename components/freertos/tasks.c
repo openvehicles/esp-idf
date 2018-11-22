@@ -489,7 +489,6 @@ to its original value when it is released. */
 #if configUSE_TICK_HOOK > 0
 	extern void vApplicationTickHook( void );
 #endif
-extern void esp_vApplicationTickHook( void );
 
 #if  portFIRST_TASK_HOOK
 	extern void vPortFirstTaskHook(TaskFunction_t taskfn);
@@ -2040,16 +2039,19 @@ BaseType_t i;
 
 	/* Add the per-core idle tasks at the lowest priority. */
 	for ( i=0; i<portNUM_PROCESSORS; i++) {
+		//Generate idle task name
+		char cIdleName[configMAX_TASK_NAME_LEN];
+		snprintf(cIdleName, configMAX_TASK_NAME_LEN, "IDLE%d", i);
 		#if ( INCLUDE_xTaskGetIdleTaskHandle == 1 )
 		{
 			/* Create the idle task, storing its handle in xIdleTaskHandle so it can
 			be returned by the xTaskGetIdleTaskHandle() function. */
-			xReturn = xTaskCreatePinnedToCore( prvIdleTask, "IDLE", tskIDLE_STACK_SIZE, ( void * ) NULL, ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), &xIdleTaskHandle[i], i ); /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+			xReturn = xTaskCreatePinnedToCore( prvIdleTask, cIdleName, tskIDLE_STACK_SIZE, ( void * ) NULL, ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), &xIdleTaskHandle[i], i ); /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
 		}
 		#else
 		{
 			/* Create the idle task without storing its handle. */
-			xReturn = xTaskCreatePinnedToCore( prvIdleTask, "IDLE", tskIDLE_STACK_SIZE, ( void * ) NULL, ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), NULL, i);  /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
+			xReturn = xTaskCreatePinnedToCore( prvIdleTask, cIdleName, tskIDLE_STACK_SIZE, ( void * ) NULL, ( tskIDLE_PRIORITY | portPRIVILEGE_BIT ), NULL, i);  /*lint !e961 MISRA exception, justified as it is not a redundant explicit cast to all supported compilers. */
 		}
 		#endif /* INCLUDE_xTaskGetIdleTaskHandle */
 	}
@@ -2494,7 +2496,9 @@ BaseType_t xSwitchRequired = pdFALSE;
 		#if ( configUSE_TICK_HOOK == 1 )
 		vApplicationTickHook();
 		#endif /* configUSE_TICK_HOOK */
+		#if ( CONFIG_FREERTOS_LEGACY_HOOKS == 1 )
 		esp_vApplicationTickHook();
+		#endif /* CONFIG_FREERTOS_LEGACY_HOOKS */
 
 		/*
 		  We can't really calculate what we need, that's done on core 0... just assume we need a switch.
@@ -2637,7 +2641,9 @@ BaseType_t xSwitchRequired = pdFALSE;
 				#if ( configUSE_TICK_HOOK == 1 )
 				vApplicationTickHook();
 				#endif /* configUSE_TICK_HOOK */
+				#if ( CONFIG_FREERTOS_LEGACY_HOOKS == 1 )
 				esp_vApplicationTickHook();
+				#endif /* CONFIG_FREERTOS_LEGACY_HOOKS */
 			}
 			else
 			{
@@ -2657,7 +2663,9 @@ BaseType_t xSwitchRequired = pdFALSE;
 			vApplicationTickHook();
 		}
 		#endif
+		#if ( CONFIG_FREERTOS_LEGACY_HOOKS == 1 )
 		esp_vApplicationTickHook();
+		#endif /* CONFIG_FREERTOS_LEGACY_HOOKS */
 	}
 
 	#if ( configUSE_PREEMPTION == 1 )
@@ -3431,10 +3439,12 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 			vApplicationIdleHook();
 		}
 		#endif /* configUSE_IDLE_HOOK */
+		#if ( CONFIG_FREERTOS_LEGACY_HOOKS == 1 )
 		{
 			/* Call the esp-idf hook system */
 			esp_vApplicationIdleHook();
 		}
+		#endif /* CONFIG_FREERTOS_LEGACY_HOOKS */
 
 
 		/* This conditional compilation should use inequality to 0, not equality
@@ -3444,7 +3454,6 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 		#if ( configUSE_TICKLESS_IDLE != 0 )
 		{
 		TickType_t xExpectedIdleTime;
-		BaseType_t xEnteredSleep = pdFALSE;
 
 			/* It is not desirable to suspend then resume the scheduler on
 			each iteration of the idle task.  Therefore, a preliminary
@@ -3466,7 +3475,7 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 					if( xExpectedIdleTime >= configEXPECTED_IDLE_TIME_BEFORE_SLEEP )
 					{
 						traceLOW_POWER_IDLE_BEGIN();
-						xEnteredSleep = portSUPPRESS_TICKS_AND_SLEEP( xExpectedIdleTime );
+						portSUPPRESS_TICKS_AND_SLEEP( xExpectedIdleTime );
 						traceLOW_POWER_IDLE_END();
 					}
 					else
@@ -3480,16 +3489,7 @@ static portTASK_FUNCTION( prvIdleTask, pvParameters )
 			{
 				mtCOVERAGE_TEST_MARKER();
 			}
-			/* It might be possible to enter tickless idle again, so skip
-			 * the fallback sleep hook if tickless idle was successful
-			 */
-			if ( !xEnteredSleep )
-			{
-				esp_vApplicationWaitiHook();
-			}
 		}
-		#else
-		esp_vApplicationWaitiHook();
 		#endif /* configUSE_TICKLESS_IDLE */
 	}
 }
@@ -3797,6 +3797,10 @@ BaseType_t xTaskGetAffinity( TaskHandle_t xTask )
 				stackinfo |= (pxNextTCB->pxTopOfStack - pxNextTCB->pxStack);
 				pxTaskStatusArray[ uxTask ].pxStackBase = (StackType_t*)stackinfo;
 #endif
+
+				#if ( configTASKLIST_INCLUDE_COREID == 1 )
+				pxTaskStatusArray[ uxTask ].xCoreID = pxNextTCB->xCoreID;
+				#endif /* configTASKLIST_INCLUDE_COREID */
 
 				#if ( INCLUDE_vTaskSuspend == 1 )
 				{
@@ -4462,7 +4466,11 @@ For ESP32 FreeRTOS, vTaskExitCritical implements both portEXIT_CRITICAL and port
 				pcWriteBuffer = prvWriteNameToBuffer( pcWriteBuffer, pxTaskStatusArray[ x ].pcTaskName );
 
 				/* Write the rest of the string. */
+#if configTASKLIST_INCLUDE_COREID
+				sprintf( pcWriteBuffer, "\t%c\t%u\t%u\t%u\t%hd\r\n", cStatus, ( unsigned int ) pxTaskStatusArray[ x ].uxCurrentPriority, ( unsigned int ) pxTaskStatusArray[ x ].usStackHighWaterMark, ( unsigned int ) pxTaskStatusArray[ x ].xTaskNumber, ( int ) pxTaskStatusArray[ x ].xCoreID );
+#else
 				sprintf( pcWriteBuffer, "\t%c\t%u\t%u\t%u\r\n", cStatus, ( unsigned int ) pxTaskStatusArray[ x ].uxCurrentPriority, ( unsigned int ) pxTaskStatusArray[ x ].usStackHighWaterMark, ( unsigned int ) pxTaskStatusArray[ x ].xTaskNumber );
+#endif
 				pcWriteBuffer += strlen( pcWriteBuffer );
 			}
 

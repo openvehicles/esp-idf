@@ -29,10 +29,9 @@ typedef enum {
 } eth_mode_t;
 
 typedef enum  {
-    ETH_CLOCK_GPIO0_IN   = 0,
-    ETH_CLOCK_GPIO0_OUT  = 1,
+    ETH_CLOCK_GPIO0_IN = 0,
     ETH_CLOCK_GPIO16_OUT = 2,
-    ETH_CLOCK_GPIO17_OUT = 3
+    ETH_CLOCK_GPIO17_OUT = 3,
 } eth_clock_mode_t;
 
 typedef enum {
@@ -84,7 +83,7 @@ typedef bool (*eth_phy_check_link_func)(void);
 typedef void (*eth_phy_check_init_func)(void);
 typedef eth_speed_mode_t (*eth_phy_get_speed_mode_func)(void);
 typedef eth_duplex_mode_t (*eth_phy_get_duplex_mode_func)(void);
-typedef void (*eth_phy_func)(void);
+typedef esp_err_t (*eth_phy_func)(void);
 typedef esp_err_t (*eth_tcpip_input_func)(void *buffer, uint16_t len, void *eb);
 typedef void (*eth_gpio_config_func)(void);
 typedef bool (*eth_phy_get_partner_pause_enable_func)(void);
@@ -108,6 +107,7 @@ typedef struct {
     bool flow_ctrl_enable;                      /*!< flag of flow ctrl enable */
     eth_phy_get_partner_pause_enable_func  phy_get_partner_pause_enable; /*!< get partner pause enable */
     eth_phy_power_enable_func  phy_power_enable;  /*!< enable or disable phy power */
+    uint32_t reset_timeout_ms;                  /*!< timeout value for reset emac */
 
 } eth_config_t;
 
@@ -124,6 +124,16 @@ typedef struct {
  *      - ESP_FAIL
  */
 esp_err_t esp_eth_init(eth_config_t *config);
+
+/**
+ * @brief  Deinit ethernet mac
+ *
+ * @return
+ *      - ESP_OK
+ *      - ESP_FAIL
+ *      - ESP_ERR_INVALID_STATE
+ */
+esp_err_t esp_eth_deinit(void);
 
 /**
  * @brief  Init Ethernet mac driver only
@@ -236,7 +246,8 @@ esp_err_t esp_eth_smi_wait_value(uint32_t reg_num, uint16_t value, uint16_t valu
  *
  * @return ESP_OK if desired value matches, ESP_ERR_TIMEOUT if timed out.
  */
-static inline esp_err_t esp_eth_smi_wait_set(uint32_t reg_num, uint16_t value_mask, int timeout_ms) {
+static inline esp_err_t esp_eth_smi_wait_set(uint32_t reg_num, uint16_t value_mask, int timeout_ms)
+{
     return esp_eth_smi_wait_value(reg_num, value_mask, value_mask, timeout_ms);
 }
 
@@ -251,25 +262,25 @@ static inline esp_err_t esp_eth_smi_wait_set(uint32_t reg_num, uint16_t value_ma
 void esp_eth_free_rx_buf(void *buf);
 
 /**
- * @brief  Get mac of ethernet interface.
- *
- * @param[out] mac: store mac of the interface.
- *
- */
-void esp_eth_get_mac(uint8_t mac[6]);
-
-/**
  * @brief  Set mac of ethernet interface.
  *
  * @note user can call this function after emac_init,and the new mac address will be enabled after emac_enable.
  *
  * @param[in] mac: the Mac address.
  *
- * @return 
+ * @return
  *    - ESP_OK: succeed
  *    - ESP_ERR_INVALID_MAC: invalid mac address
  */
 esp_err_t esp_eth_set_mac(const uint8_t mac[6]);
+
+/**
+ * @brief Get Ethernet link speed
+ *
+ * @return eth_speed_mode_t ETH_SPEED_MODE_10M when link speed is 10Mbps
+ *                          ETH_SPEED_MODE_100M when link speed is 100Mbps
+ */
+eth_speed_mode_t esp_eth_get_speed(void);
 
 #ifdef __cplusplus
 }

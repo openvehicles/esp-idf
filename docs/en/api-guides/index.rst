@@ -6,6 +6,7 @@ API Guides
 
    General Notes <general-notes>
    Build System <build-system>
+   Build System (CMake) <build-system-cmake>
    Error Handling <error-handling>
    Fatal Errors <fatal-errors>
    Deep Sleep Wake Stubs <deep-sleep-stub>
@@ -19,11 +20,12 @@ API Guides
    Partition Tables <partition-tables>
    Secure Boot <../security/secure-boot>
    ULP Coprocessor <ulp>
+   ULP Coprocessor (CMake) <ulp-cmake>
    Unit Testing <unit-tests>
    Application Level Tracing <app_trace>
    Console Component <console>
    ROM debug console <romconsole>
    WiFi Driver <wifi>
-   Mesh Stack <mesh>
+   ESP-MESH <mesh>
    BluFi <blufi>
    External SPI-connected RAM <external-ram>

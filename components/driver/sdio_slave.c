@@ -155,7 +155,7 @@ typedef struct {
     SemaphoreHandle_t remain_cnt;
 } sdio_ringbuf_t;
 
-#define offset_of(type, field) ((unsigned int)&(((type *)(0))->field))  
+#define offset_of(type, field) ((unsigned int)&(((type *)(0))->field))
 typedef enum {
     ringbuf_write_ptr = offset_of(sdio_ringbuf_t, write_ptr),
     ringbuf_read_ptr = offset_of(sdio_ringbuf_t, read_ptr),
@@ -266,7 +266,7 @@ no_mem:
 }
 
 //calculate a pointer with offset to a original pointer of the specific ringbuffer
-static inline uint8_t* sdio_ringbuf_offset_ptr(sdio_ringbuf_t *buf, sdio_ringbuf_pointer_t ptr, uint32_t offset) 
+static inline uint8_t* sdio_ringbuf_offset_ptr(sdio_ringbuf_t *buf, sdio_ringbuf_pointer_t ptr, uint32_t offset)
 {
     uint8_t *buf_ptr = (uint8_t*)*(uint32_t*)(((uint8_t*)buf)+ptr);   //get the specific pointer of the buffer
     uint8_t *offset_ptr=buf_ptr+offset;
@@ -277,7 +277,7 @@ static inline uint8_t* sdio_ringbuf_offset_ptr(sdio_ringbuf_t *buf, sdio_ringbuf
 static esp_err_t sdio_ringbuf_send(sdio_ringbuf_t* buf, esp_err_t (*copy_callback)(uint8_t*, void*), void* arg, TickType_t wait)
 {
     portBASE_TYPE ret = xSemaphoreTake(buf->remain_cnt, wait);
-    if (ret != pdTRUE) return NULL;
+    if (ret != pdTRUE) return ESP_ERR_TIMEOUT;
 
     portENTER_CRITICAL(&buf->write_spinlock);
     uint8_t* get_ptr = sdio_ringbuf_offset_ptr(buf, ringbuf_write_ptr, buf->item_size);
@@ -472,9 +472,9 @@ static void configure_pin(int pin, uint32_t func, bool pullup)
     PIN_INPUT_ENABLE(reg);
     PIN_FUNC_SELECT(reg, sdmmc_func);
     PIN_SET_DRV(reg, drive_strength);
+    gpio_pulldown_dis(pin);
     if (pullup) {
         gpio_pullup_en(pin);
-        gpio_pulldown_dis(pin);
     }
 }
 
@@ -492,9 +492,9 @@ static inline esp_err_t sdio_slave_hw_init(sdio_slave_config_t *config)
     configure_pin(slot->d0_gpio, slot->func, pullup);
     if ((config->flags & SDIO_SLAVE_FLAG_HOST_INTR_DISABLED)==0) {
         configure_pin(slot->d1_gpio, slot->func, pullup);
-    } 
+    }
     if ((config->flags & SDIO_SLAVE_FLAG_DAT2_DISABLED)==0) {
-       configure_pin(slot->d2_gpio, slot->func, pullup); 
+       configure_pin(slot->d2_gpio, slot->func, pullup);
     }
     configure_pin(slot->d3_gpio, slot->func, pullup);
 
@@ -516,28 +516,28 @@ static inline esp_err_t sdio_slave_hw_init(sdio_slave_config_t *config)
 
     switch(config->timing) {
         case SDIO_SLAVE_TIMING_PSEND_PSAMPLE:
-            HOST.conf.frc_sdio20 = 0xf;
+            HOST.conf.frc_sdio20 = 0x1f;
             HOST.conf.frc_sdio11 = 0;
-            HOST.conf.frc_pos_samp = 0xf;
+            HOST.conf.frc_pos_samp = 0x1f;
             HOST.conf.frc_neg_samp = 0;
             break;
         case SDIO_SLAVE_TIMING_PSEND_NSAMPLE:
-            HOST.conf.frc_sdio20 = 0xf;
+            HOST.conf.frc_sdio20 = 0x1f;
             HOST.conf.frc_sdio11 = 0;
             HOST.conf.frc_pos_samp = 0;
-            HOST.conf.frc_neg_samp = 0xf;
+            HOST.conf.frc_neg_samp = 0x1f;
             break;
         case SDIO_SLAVE_TIMING_NSEND_PSAMPLE:
             HOST.conf.frc_sdio20 = 0;
-            HOST.conf.frc_sdio11 = 0xf;
-            HOST.conf.frc_pos_samp = 0xf;
+            HOST.conf.frc_sdio11 = 0x1f;
+            HOST.conf.frc_pos_samp = 0x1f;
             HOST.conf.frc_neg_samp = 0;
             break;
         case SDIO_SLAVE_TIMING_NSEND_NSAMPLE:
             HOST.conf.frc_sdio20 = 0;
-            HOST.conf.frc_sdio11 = 0xf;
+            HOST.conf.frc_sdio11 = 0x1f;
             HOST.conf.frc_pos_samp = 0;
-            HOST.conf.frc_neg_samp = 0xf;
+            HOST.conf.frc_neg_samp = 0x1f;
             break;
     }
 
@@ -929,9 +929,11 @@ esp_err_t sdio_slave_send_queue(uint8_t* addr, size_t len, void* arg, TickType_t
     return ESP_OK;
 }
 
-esp_err_t sdio_slave_send_get_finished(void** arg, TickType_t wait)
+esp_err_t sdio_slave_send_get_finished(void** out_arg, TickType_t wait)
 {
-    portBASE_TYPE err = xQueueReceive(context.ret_queue, arg, wait);
+    void* arg = NULL;
+    portBASE_TYPE err = xQueueReceive(context.ret_queue, &arg, wait);
+    if (out_arg) *out_arg = arg;
     if (err != pdTRUE) return ESP_ERR_TIMEOUT;
     return ESP_OK;
 }
@@ -963,7 +965,7 @@ static esp_err_t send_flush_data()
     if (context.in_flight) {
         buf_desc_t *desc = context.in_flight;
         while(desc != NULL) {
-            xQueueSend(context.ret_queue, desc->arg, portMAX_DELAY);
+            xQueueSend(context.ret_queue, &desc->arg, portMAX_DELAY);
             last = desc;
             desc = STAILQ_NEXT(desc, qe);
         }
@@ -978,7 +980,7 @@ static esp_err_t send_flush_data()
     if (ret == ESP_OK) {
         buf_desc_t *desc = head;
         while(desc != NULL) {
-            xQueueSend(context.ret_queue, desc->arg, portMAX_DELAY);
+            xQueueSend(context.ret_queue, &desc->arg, portMAX_DELAY);
             last = desc;
             desc = STAILQ_NEXT(desc, qe);
         }
@@ -1141,9 +1143,12 @@ static void sdio_intr_recv(void* arg)
             // This may cause the ``cur_ret`` pointer to be NULL, indicating the list is empty,
             // in this case the ``tx_done`` should happen no longer until new desc is appended.
             // The app is responsible to place the pointer to the right place again when appending new desc.
+            critical_enter_recv();
             context.recv_cur_ret = STAILQ_NEXT(context.recv_cur_ret, qe);
+            critical_exit_recv();
             ESP_EARLY_LOGV(TAG, "intr_recv: Give");
             xSemaphoreGiveFromISR(context.recv_event, &yield);
+            SLC.slc0_int_clr.tx_done = 1;
         };
     }
     if (yield) portYIELD_FROM_ISR();
@@ -1164,19 +1169,9 @@ esp_err_t sdio_slave_recv_load_buf(sdio_slave_buf_handle_t handle)
     buf_desc_t *const tail = STAILQ_LAST(queue, buf_desc_s, qe);
 
     STAILQ_INSERT_TAIL(queue, desc, qe);
-    if (tail == NULL || (tail->owner == 0)) {
-        //in this case we have to set the ret pointer
-        if (tail != NULL) {
-            /* if the owner of the tail is returned to the software, the ISR is
-             * expect to write this pointer to NULL in a short time, wait until
-             * that and set new value for this pointer
-             */
-            while (context.recv_cur_ret != NULL) {}
-        }
-        assert(context.recv_cur_ret == NULL);
+    if (context.recv_cur_ret == NULL) {
         context.recv_cur_ret = desc;
     }
-    assert(context.recv_cur_ret != NULL);
 
     if (tail == NULL) {
         //no one in the ll, start new ll operation.

@@ -74,6 +74,24 @@ void IRAM_ATTR phy_exit_critical(uint32_t level)
     portEXIT_CRITICAL_NESTED(level);
 }
 
+static inline void phy_update_wifi_mac_time(bool en_clock_stopped)
+{
+    static uint32_t s_common_clock_disable_time = 0;
+
+    if (en_clock_stopped) {
+        s_common_clock_disable_time = esp_timer_get_time();
+    } else {
+        if (s_common_clock_disable_time) {
+            uint64_t now = esp_timer_get_time();
+            uint32_t diff = now - s_common_clock_disable_time;
+
+            esp_wifi_internal_update_mac_time(diff);
+            s_common_clock_disable_time = 0;
+            ESP_LOGD(TAG, "wifi mac time delta: %u", diff);
+        }
+    }
+}
+
 esp_err_t esp_phy_rf_init(const esp_phy_init_data_t* init_data, esp_phy_calibration_mode_t mode, 
                           esp_phy_calibration_data_t* calibration_data, phy_rf_module_t module)
 {
@@ -117,6 +135,8 @@ esp_err_t esp_phy_rf_init(const esp_phy_init_data_t* init_data, esp_phy_calibrat
             }
         }
         if (s_is_phy_rf_en == true){
+            // Update WiFi MAC time before WiFi/BT common clock is enabled
+            phy_update_wifi_mac_time( false );
             // Enable WiFi/BT common peripheral clock
             periph_module_enable(PERIPH_WIFI_BT_COMMON_MODULE);
             phy_set_wifi_mode_only(0);
@@ -129,6 +149,7 @@ esp_err_t esp_phy_rf_init(const esp_phy_init_data_t* init_data, esp_phy_calibrat
                 }
 #endif
             }
+
 
 extern esp_err_t wifi_osi_funcs_register(wifi_osi_funcs_t *osi_funcs);
             status = wifi_osi_funcs_register(&g_wifi_osi_funcs);
@@ -207,6 +228,8 @@ esp_err_t esp_phy_rf_deinit(phy_rf_module_t module)
         if (s_is_phy_rf_en == false) {
             // Disable PHY and RF.
             phy_close_rf();
+            // Update WiFi MAC time before disalbe WiFi/BT common peripheral clock
+            phy_update_wifi_mac_time(true);
             // Disable WiFi/BT common peripheral clock. Do not disable clock for hardware RNG
             periph_module_disable(PERIPH_WIFI_BT_COMMON_MODULE);
         }
@@ -531,6 +554,18 @@ static esp_err_t store_cal_data_to_nvs_handle(nvs_handle handle,
     return err;
 }
 
+#if CONFIG_REDUCE_PHY_TX_POWER
+static void esp_phy_reduce_tx_power(esp_phy_init_data_t* init_data)
+{
+    uint8_t i;
+                                         
+    for(i = 0; i < PHY_TX_POWER_NUM; i++) {
+        // LOWEST_PHY_TX_POWER is the lowest tx power
+        init_data->params[PHY_TX_POWER_OFFSET+i] = PHY_TX_POWER_LOWEST;   
+    }
+}
+#endif
+
 void esp_phy_load_cal_and_init(phy_rf_module_t module)
 {
     esp_phy_calibration_data_t* cal_data =
@@ -540,11 +575,30 @@ void esp_phy_load_cal_and_init(phy_rf_module_t module)
         abort();
     }
 
+#if CONFIG_REDUCE_PHY_TX_POWER
+    const esp_phy_init_data_t* phy_init_data = esp_phy_get_init_data();
+    if (phy_init_data == NULL) {
+        ESP_LOGE(TAG, "failed to obtain PHY init data");
+        abort();
+    }
+
+    esp_phy_init_data_t* init_data = (esp_phy_init_data_t*) malloc(sizeof(esp_phy_init_data_t));
+    if (init_data == NULL) {
+        ESP_LOGE(TAG, "failed to allocate memory for phy init data");
+        abort();
+    }
+
+    memcpy(init_data, phy_init_data, sizeof(esp_phy_init_data_t));
+    if (esp_reset_reason() == ESP_RST_BROWNOUT) {
+        esp_phy_reduce_tx_power(init_data);
+    }
+#else
     const esp_phy_init_data_t* init_data = esp_phy_get_init_data();
     if (init_data == NULL) {
         ESP_LOGE(TAG, "failed to obtain PHY init data");
         abort();
     }
+#endif
 
 #ifdef CONFIG_ESP32_PHY_CALIBRATION_AND_DATA_STORAGE
     esp_phy_calibration_mode_t calibration_mode = PHY_RF_CAL_PARTIAL;
@@ -571,7 +625,12 @@ void esp_phy_load_cal_and_init(phy_rf_module_t module)
     esp_phy_rf_init(init_data, PHY_RF_CAL_FULL, cal_data, module);
 #endif
 
+#if CONFIG_REDUCE_PHY_TX_POWER
+    esp_phy_release_init_data(phy_init_data);
+    free(init_data);
+#else
     esp_phy_release_init_data(init_data);
+#endif
 
     free(cal_data); // PHY maintains a copy of calibration data, so we can free this
 }

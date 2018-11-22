@@ -1,6 +1,9 @@
+// Copyright 2016-2018 Espressif Systems (Shanghai) PTE LTD
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
-
+//
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
@@ -98,12 +101,12 @@ In ADC2, there're two locks used for different cases:
 adc2_spinlock should be acquired first, then adc2_wifi_lock or rtc_spinlock.
 */
 //prevent ADC2 being used by wifi and other tasks at the same time.
-static _lock_t adc2_wifi_lock = NULL;
+static _lock_t adc2_wifi_lock;
 //prevent ADC2 being used by tasks (regardless of WIFI)
 portMUX_TYPE adc2_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 //prevent ADC1 being used by I2S dma and other tasks at the same time.
-static _lock_t adc1_i2s_lock = NULL;
+static _lock_t adc1_i2s_lock;
 
 typedef struct {
     TimerHandle_t timer;
@@ -380,6 +383,37 @@ void rtc_gpio_force_hold_dis_all()
     }
 }
 
+esp_err_t rtc_gpio_wakeup_enable(gpio_num_t gpio_num, gpio_int_type_t intr_type)
+{
+    int rtc_num = rtc_gpio_desc[gpio_num].rtc_num;
+    if (rtc_num < 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (( intr_type != GPIO_INTR_LOW_LEVEL ) && ( intr_type != GPIO_INTR_HIGH_LEVEL )) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint32_t reg = RTC_GPIO_PIN0_REG + rtc_num * sizeof(uint32_t);
+    /* each pin has its own register, spinlock not needed */
+    REG_SET_BIT(reg, RTC_GPIO_PIN0_WAKEUP_ENABLE);
+    REG_SET_FIELD(reg, RTC_GPIO_PIN0_INT_TYPE, intr_type);
+    return ESP_OK;
+}
+
+esp_err_t rtc_gpio_wakeup_disable(gpio_num_t gpio_num)
+{
+    int rtc_num = rtc_gpio_desc[gpio_num].rtc_num;
+    if (rtc_num < 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint32_t reg = RTC_GPIO_PIN0_REG + rtc_num * sizeof(uint32_t);
+    /* each pin has its own register, spinlock not needed */
+    REG_CLR_BIT(reg, RTC_GPIO_PIN0_WAKEUP_ENABLE);
+    REG_SET_FIELD(reg, RTC_GPIO_PIN0_INT_TYPE, 0);
+    return ESP_OK;
+}
+
 
 /*---------------------------------------------------------------
                     Touch Pad
@@ -476,7 +510,7 @@ static void touch_pad_filter_cb(void *arg)
 {
     static uint32_t s_filtered_temp[TOUCH_PAD_MAX] = {0};
 
-    if (s_touch_pad_filter == NULL) {
+    if (s_touch_pad_filter == NULL || rtc_touch_mux == NULL) {
         return;
     }
     uint16_t val = 0;
@@ -825,14 +859,17 @@ esp_err_t touch_pad_init()
 
 esp_err_t touch_pad_deinit()
 {
-    if (rtc_touch_mux == NULL) {
-        return ESP_FAIL;
+    RTC_MODULE_CHECK(rtc_touch_mux != NULL, "Touch pad not initialized", ESP_FAIL);
+    if (s_touch_pad_filter != NULL) {
+        touch_pad_filter_stop();
+        touch_pad_filter_delete();
     }
+    xSemaphoreTake(rtc_touch_mux, portMAX_DELAY);
     s_touch_pad_init_bit = 0x0000;
-    touch_pad_filter_delete();
     touch_pad_set_fsm_mode(TOUCH_FSM_MODE_SW);
     touch_pad_clear_status();
     touch_pad_intr_disable();
+    xSemaphoreGive(rtc_touch_mux);
     vSemaphoreDelete(rtc_touch_mux);
     rtc_touch_mux = NULL;
     return ESP_OK;
@@ -972,7 +1009,7 @@ esp_err_t touch_pad_filter_start(uint32_t filter_period_ms)
 esp_err_t touch_pad_filter_stop()
 {
     RTC_MODULE_CHECK(s_touch_pad_filter != NULL, "Touch pad filter not initialized", ESP_ERR_INVALID_STATE);
-
+    RTC_MODULE_CHECK(rtc_touch_mux != NULL, "Touch pad not initialized", ESP_ERR_INVALID_STATE);
     esp_err_t ret = ESP_OK;
     xSemaphoreTake(rtc_touch_mux, portMAX_DELAY);
     if (s_touch_pad_filter != NULL) {
@@ -988,6 +1025,7 @@ esp_err_t touch_pad_filter_stop()
 esp_err_t touch_pad_filter_delete()
 {
     RTC_MODULE_CHECK(s_touch_pad_filter != NULL, "Touch pad filter not initialized", ESP_ERR_INVALID_STATE);
+    RTC_MODULE_CHECK(rtc_touch_mux != NULL, "Touch pad not initialized", ESP_ERR_INVALID_STATE);
     xSemaphoreTake(rtc_touch_mux, portMAX_DELAY);
     if (s_touch_pad_filter != NULL) {
         if (s_touch_pad_filter->timer != NULL) {
@@ -999,6 +1037,16 @@ esp_err_t touch_pad_filter_delete()
         s_touch_pad_filter = NULL;
     }
     xSemaphoreGive(rtc_touch_mux);
+    return ESP_OK;
+}
+
+esp_err_t touch_pad_get_wakeup_status(touch_pad_t *pad_num)
+{
+    uint32_t touch_mask = SENS.sar_touch_ctrl2.touch_meas_en;
+    if(touch_mask == 0) {
+        return ESP_FAIL;
+    }
+    *pad_num = touch_pad_num_wrap((touch_pad_t)(__builtin_ffs(touch_mask) - 1));
     return ESP_OK;
 }
 
@@ -1983,6 +2031,7 @@ esp_err_t rtc_isr_deregister(intr_handler_t handler, void* handler_arg)
                 SLIST_REMOVE_AFTER(prev, next);
             }
             found = true;
+            free(it);
             break;
         }
         prev = it;

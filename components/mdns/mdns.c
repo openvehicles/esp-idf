@@ -1195,7 +1195,7 @@ static void _mdns_create_answer_from_parsed_packet(mdns_parsed_packet_t * parsed
         }
         if (service) {
             if (q->type == MDNS_TYPE_PTR || q->type == MDNS_TYPE_ANY) {
-                if (q->type == MDNS_TYPE_PTR) {
+                if (q->type == MDNS_TYPE_PTR || !parsed_packet->probe) {
                     shared = true;
                 }
                 if (!_mdns_alloc_answer(&packet->answers, MDNS_TYPE_PTR, service->service, false, false)
@@ -1419,6 +1419,7 @@ static void _mdns_pcb_send_bye(tcpip_adapter_if_t tcpip_if, mdns_ip_protocol_t i
     if (!packet) {
         return;
     }
+    packet->flags = MDNS_FLAGS_AUTHORITATIVE;
     size_t i;
     for (i=0; i<len; i++) {
         if (!_mdns_alloc_answer(&packet->answers, MDNS_TYPE_PTR, services[i]->service, true, true)) {
@@ -1754,6 +1755,17 @@ static mdns_txt_linked_item_t * _mdns_allocate_txt(size_t num_items, mdns_txt_it
         }
     }
     return new_txt;
+}
+static void _mdns_free_linked_txt(mdns_txt_linked_item_t *txt)
+{
+    mdns_txt_linked_item_t *t;
+    while (txt) {
+        t = txt;
+        txt = txt->next;
+        free((char *)t->value);
+        free((char *)t->key);
+        free(t);
+    }
 }
 
 /**
@@ -2569,7 +2581,7 @@ void mdns_parse_packet(mdns_rx_packet_t * packet)
                 continue;
             }
 
-            if (type == MDNS_TYPE_ANY) {
+            if (type == MDNS_TYPE_ANY && !_str_null_or_empty(name->host)) {
                 parsed_packet->probe = true;
             }
 
@@ -3553,7 +3565,7 @@ static void _mdns_free_action(mdns_action_t * action)
         free(action->data.srv_instance.instance);
         break;
     case ACTION_SERVICE_TXT_REPLACE:
-        free(action->data.srv_txt_replace.txt);
+        _mdns_free_linked_txt(action->data.srv_txt_replace.txt);
         break;
     case ACTION_SERVICE_TXT_SET:
         free(action->data.srv_txt_set.key);
@@ -3635,14 +3647,8 @@ static void _mdns_execute_action(mdns_action_t * action)
         service = action->data.srv_txt_replace.service->service;
         txt = service->txt;
         service->txt = NULL;
-        while (txt) {
-            t = txt;
-            txt = txt->next;
-            free((char *)t->value);
-            free((char *)t->key);
-            free(t);
-        }
-        service->txt = _mdns_allocate_txt(action->data.srv_txt_replace.num_items, action->data.srv_txt_replace.txt);
+        _mdns_free_linked_txt(txt);
+        service->txt = action->data.srv_txt_replace.txt;
         _mdns_announce_all_pcbs(&action->data.srv_txt_replace.service, 1, false);
 
         break;
@@ -4223,27 +4229,25 @@ esp_err_t mdns_service_txt_set(const char * service, const char * proto, mdns_tx
         return ESP_ERR_NOT_FOUND;
     }
 
-    mdns_txt_item_t * txt_copy = NULL;
+    mdns_txt_linked_item_t * new_txt = NULL;
     if (num_items){
-        txt_copy = (mdns_txt_item_t *)malloc(num_items * sizeof(mdns_txt_item_t));
-        if (!txt_copy) {
+        new_txt = _mdns_allocate_txt(num_items, txt);
+        if (!new_txt) {
             return ESP_ERR_NO_MEM;
         }
-        memcpy(txt_copy, txt, num_items * sizeof(mdns_txt_item_t));
     }
 
     mdns_action_t * action = (mdns_action_t *)malloc(sizeof(mdns_action_t));
     if (!action) {
-        free(txt_copy);
+        _mdns_free_linked_txt(new_txt);
         return ESP_ERR_NO_MEM;
     }
     action->type = ACTION_SERVICE_TXT_REPLACE;
     action->data.srv_txt_replace.service = s;
-    action->data.srv_txt_replace.num_items = num_items;
-    action->data.srv_txt_replace.txt = txt_copy;
+    action->data.srv_txt_replace.txt = new_txt;
 
     if (xQueueSend(_mdns_server->action_queue, &action, (portTickType)0) != pdPASS) {
-        free(txt_copy);
+        _mdns_free_linked_txt(new_txt);
         free(action);
         return ESP_ERR_NO_MEM;
     }
