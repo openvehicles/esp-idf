@@ -68,7 +68,7 @@ class Parser(object):
         table = CreateSectionTable.SectionTable("section_table.tmp")
         tags = self.parse_tags(os.path.join(config_output_folder, self.SDKCONFIG_FILE))
         test_cases = []
-        with open("case_address.tmp", "r") as f:
+        with open("case_address.tmp", "rb") as f:
             for line in f:
                 # process symbol table like: "3ffb4310 l     O .dram0.data	00000018 test_desc_33$5010"
                 line = line.split()
@@ -235,7 +235,7 @@ class Parser(object):
         dump parsed test cases to YAML file for test bench input
         :param test_cases: parsed test cases
         """
-        with open(os.path.join(self.idf_path, self.TEST_CASE_FILE), "wb+") as f:
+        with open(os.path.join(self.idf_path, self.TEST_CASE_FILE), "w+") as f:
             yaml.dump({"test cases": test_cases}, f, allow_unicode=True, default_flow_style=False)
 
     def copy_module_def_file(self):
@@ -254,7 +254,7 @@ class Parser(object):
             config_output_folder = os.path.join(output_folder, config)
             if os.path.exists(config_output_folder):
                 test_cases.extend(self.parse_test_cases_for_one_config(config_output_folder, config))
-
+        test_cases.sort(key=lambda x: x["config"] + x["summary"])
         self.dump_test_cases(test_cases)
 
 
@@ -297,7 +297,7 @@ def test_parser():
     }
     sdkconfig = ["123", "789"]
     tags = parser.parse_tags_internal(sdkconfig, config_dependency, parser.CONFIG_PATTERN)
-    assert tags == ['a', 'd', 'f']
+    assert sorted(tags) == ['a', 'd', 'f'] # sorted is required for older Python3, e.g. 3.4.8
 
 
 def main():

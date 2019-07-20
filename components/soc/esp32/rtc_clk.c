@@ -39,10 +39,16 @@
 #define RTC_SLOW_CLK_FREQ_8MD256    (RTC_FAST_CLK_FREQ_8M / 256)
 #define RTC_SLOW_CLK_FREQ_32K       32768
 
+/* BBPLL configuration values */
 #define BBPLL_ENDIV5_VAL_320M       0x43
 #define BBPLL_BBADC_DSMP_VAL_320M   0x84
 #define BBPLL_ENDIV5_VAL_480M       0xc3
 #define BBPLL_BBADC_DSMP_VAL_480M   0x74
+#define BBPLL_IR_CAL_DELAY_VAL      0x18
+#define BBPLL_IR_CAL_EXT_CAP_VAL    0x20
+#define BBPLL_OC_ENB_FCAL_VAL       0x9a
+#define BBPLL_OC_ENB_VCON_VAL       0x00
+#define BBPLL_BBADC_CAL_7_0_VAL     0x00
 
 #define APLL_SDM_STOP_VAL_1         0x09
 #define APLL_SDM_STOP_VAL_2_REV0    0x69
@@ -52,7 +58,7 @@
 #define APLL_CAL_DELAY_2            0x3f
 #define APLL_CAL_DELAY_3            0x1f
 
-#define XTAL_32K_DAC_VAL    1
+#define XTAL_32K_DAC_VAL    3
 #define XTAL_32K_DRES_VAL   3
 #define XTAL_32K_DBIAS_VAL  0
 
@@ -79,6 +85,8 @@
 /* Core voltage needs to be increased in two cases:
  * 1. running at 240 MHz
  * 2. running with 80MHz Flash frequency
+ *
+ * There is a record in efuse which indicates the proper voltage for these two cases.
  */
 #ifdef CONFIG_ESPTOOLPY_FLASHFREQ_80M
 #define DIG_DBIAS_80M_160M  RTC_CNTL_DBIAS_1V25
@@ -105,14 +113,36 @@ static const char* TAG = "rtc_clk";
 
 static void rtc_clk_32k_enable_common(int dac, int dres, int dbias)
 {
-    SET_PERI_REG_MASK(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_X32N_MUX_SEL | RTC_IO_X32P_MUX_SEL);
     CLEAR_PERI_REG_MASK(RTC_IO_XTAL_32K_PAD_REG,
-            RTC_IO_X32P_RDE | RTC_IO_X32P_RUE | RTC_IO_X32N_RUE |
-            RTC_IO_X32N_RDE | RTC_IO_X32N_MUX_SEL | RTC_IO_X32P_MUX_SEL);
+                        RTC_IO_X32P_RDE | RTC_IO_X32P_RUE | RTC_IO_X32N_RUE |
+                        RTC_IO_X32N_RDE | RTC_IO_X32N_FUN_IE | RTC_IO_X32P_FUN_IE);
+    SET_PERI_REG_MASK(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_X32N_MUX_SEL | RTC_IO_X32P_MUX_SEL);
+    /* Set the parameters of xtal
+        dac --> current
+        dres --> resistance
+        dbias --> bais voltage
+    */
     REG_SET_FIELD(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_DAC_XTAL_32K, dac);
     REG_SET_FIELD(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_DRES_XTAL_32K, dres);
     REG_SET_FIELD(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_DBIAS_XTAL_32K, dbias);
-    SET_PERI_REG_MASK(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_XPD_XTAL_32K);
+
+#ifdef CONFIG_ESP32_RTC_EXTERNAL_CRYSTAL_ADDITIONAL_CURRENT
+    /* TOUCH sensor can provide additional current to external XTAL.
+       In some case, X32N and X32P PAD don't have enough drive capability to start XTAL */
+    SET_PERI_REG_MASK(RTC_IO_TOUCH_CFG_REG, RTC_IO_TOUCH_XPD_BIAS_M);
+    /* Tie PAD Touch8 to VDD
+       NOTE: TOUCH8 and TOUCH9 register settings are reversed except for DAC, so we set RTC_IO_TOUCH_PAD9_REG here instead
+    */
+    SET_PERI_REG_MASK(RTC_IO_TOUCH_PAD9_REG, RTC_IO_TOUCH_PAD9_TIE_OPT_M);
+    /* Set the current used to compensate TOUCH PAD8 */
+    SET_PERI_REG_BITS(RTC_IO_TOUCH_PAD8_REG, RTC_IO_TOUCH_PAD8_DAC, 4, RTC_IO_TOUCH_PAD8_DAC_S);
+    /* Power up TOUCH8
+       So the Touch DAC start to drive some current from VDD to TOUCH8(which is also XTAL-N)
+     */
+    SET_PERI_REG_MASK(RTC_IO_TOUCH_PAD9_REG, RTC_IO_TOUCH_PAD9_XPD_M);
+#endif // CONFIG_ESP32_RTC_EXTERNAL_CRYSTAL_ADDITIONAL_CURRENT
+    /* Power up external xtal */
+    SET_PERI_REG_MASK(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_XPD_XTAL_32K_M);
 }
 
 void rtc_clk_32k_enable(bool enable)
@@ -120,7 +150,14 @@ void rtc_clk_32k_enable(bool enable)
     if (enable) {
         rtc_clk_32k_enable_common(XTAL_32K_DAC_VAL, XTAL_32K_DRES_VAL, XTAL_32K_DBIAS_VAL);
     } else {
-        CLEAR_PERI_REG_MASK(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_XPD_XTAL_32K);
+        /* Disable X32N and X32P pad drive external xtal */
+        CLEAR_PERI_REG_MASK(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_XPD_XTAL_32K_M);
+        CLEAR_PERI_REG_MASK(RTC_IO_XTAL_32K_PAD_REG, RTC_IO_X32N_MUX_SEL | RTC_IO_X32P_MUX_SEL);
+
+#ifdef CONFIG_ESP32_RTC_EXTERNAL_CRYSTAL_ADDITIONAL_CURRENT
+        /* Power down TOUCH */
+        CLEAR_PERI_REG_MASK(RTC_IO_TOUCH_PAD9_REG, RTC_IO_TOUCH_PAD9_XPD_M);
+#endif // CONFIG_ESP32_RTC_EXTERNAL_CRYSTAL_ADDITIONAL_CURRENT
     }
 }
 
@@ -389,7 +426,6 @@ void rtc_clk_cpu_freq_to_xtal(int freq, int div)
     REG_WRITE(APB_CTRL_XTAL_TICK_CONF_REG, freq * MHZ / REF_CLK_FREQ - 1);
     /* switch clock source */
     REG_SET_FIELD(RTC_CNTL_CLK_CONF_REG, RTC_CNTL_SOC_CLK_SEL, RTC_CNTL_SOC_CLK_SEL_XTL);
-    DPORT_REG_WRITE(DPORT_CPU_PER_CONF_REG, 0); /* clear DPORT_CPUPERIOD_SEL */
     rtc_clk_apb_freq_update(freq * MHZ);
     /* lower the voltage */
     if (freq <= 2) {
@@ -405,7 +441,6 @@ static void rtc_clk_cpu_freq_to_8m()
     REG_SET_FIELD(RTC_CNTL_REG, RTC_CNTL_DIG_DBIAS_WAK, DIG_DBIAS_XTAL);
     REG_SET_FIELD(APB_CTRL_SYSCLK_CONF_REG, APB_CTRL_PRE_DIV_CNT, 0);
     REG_SET_FIELD(RTC_CNTL_CLK_CONF_REG, RTC_CNTL_SOC_CLK_SEL, RTC_CNTL_SOC_CLK_SEL_8M);
-    DPORT_REG_WRITE(DPORT_CPU_PER_CONF_REG, 0); // clear DPORT_CPUPERIOD_SEL
     rtc_clk_apb_freq_update(RTC_FAST_CLK_FREQ_8M);
 }
 
@@ -429,6 +464,13 @@ static void rtc_clk_bbpll_enable()
     CLEAR_PERI_REG_MASK(RTC_CNTL_OPTIONS0_REG,
              RTC_CNTL_BIAS_I2C_FORCE_PD | RTC_CNTL_BB_I2C_FORCE_PD |
              RTC_CNTL_BBPLL_FORCE_PD | RTC_CNTL_BBPLL_I2C_FORCE_PD);
+
+    /* reset BBPLL configuration */
+    I2C_WRITEREG_RTC(I2C_BBPLL, I2C_BBPLL_IR_CAL_DELAY, BBPLL_IR_CAL_DELAY_VAL);
+    I2C_WRITEREG_RTC(I2C_BBPLL, I2C_BBPLL_IR_CAL_EXT_CAP, BBPLL_IR_CAL_EXT_CAP_VAL);
+    I2C_WRITEREG_RTC(I2C_BBPLL, I2C_BBPLL_OC_ENB_FCAL, BBPLL_OC_ENB_FCAL_VAL);
+    I2C_WRITEREG_RTC(I2C_BBPLL, I2C_BBPLL_OC_ENB_VCON, BBPLL_OC_ENB_VCON_VAL);
+    I2C_WRITEREG_RTC(I2C_BBPLL, I2C_BBPLL_BBADC_CAL_7_0, BBPLL_BBADC_CAL_7_0_VAL);
 }
 
 /**
@@ -439,14 +481,14 @@ static void rtc_clk_bbpll_enable()
 static void rtc_clk_cpu_freq_to_pll_mhz(int cpu_freq_mhz)
 {
     int dbias = DIG_DBIAS_80M_160M;
-    int per_conf = 0;
+    int per_conf = DPORT_CPUPERIOD_SEL_80;
     if (cpu_freq_mhz == 80) {
         /* nothing to do */
     } else if (cpu_freq_mhz == 160) {
-        per_conf = 1;
+        per_conf = DPORT_CPUPERIOD_SEL_160;
     } else if (cpu_freq_mhz == 240) {
         dbias = DIG_DBIAS_240M;
-        per_conf = 2;
+        per_conf = DPORT_CPUPERIOD_SEL_240;
     } else {
         SOC_LOGE(TAG, "invalid frequency");
         abort();
@@ -674,15 +716,15 @@ void rtc_clk_cpu_freq_get_config(rtc_cpu_freq_config_t* out_config)
         case RTC_CNTL_SOC_CLK_SEL_PLL: {
             source = RTC_CPU_FREQ_SRC_PLL;
             uint32_t cpuperiod_sel = DPORT_REG_GET_FIELD(DPORT_CPU_PER_CONF_REG, DPORT_CPUPERIOD_SEL);
-            if (cpuperiod_sel == 0) {
+            if (cpuperiod_sel == DPORT_CPUPERIOD_SEL_80) {
                 source_freq_mhz = RTC_PLL_FREQ_320M;
                 div = 4;
                 freq_mhz = 80;
-            } else if (cpuperiod_sel == 1) {
+            } else if (cpuperiod_sel == DPORT_CPUPERIOD_SEL_160) {
                 source_freq_mhz = RTC_PLL_FREQ_320M;
                 div = 2;
                 freq_mhz = 160;
-            } else if (cpuperiod_sel == 2) {
+            } else if (cpuperiod_sel == DPORT_CPUPERIOD_SEL_240) {
                 source_freq_mhz = RTC_PLL_FREQ_480M;
                 div = 2;
                 freq_mhz = 240;

@@ -57,6 +57,7 @@ PROVIDE ( _bss_start_btdm = 0x3ffb8000);
 PROVIDE ( _bss_end_btdm = 0x3ffbff70);
 PROVIDE ( _daylight = 0x3ffae0a4 );
 PROVIDE ( dbg_default_handler = 0x3ff97218 );
+PROVIDE ( dbg_default_state = 0x3ff97220 );
 PROVIDE ( dbg_state = 0x3ffb8d5d );
 PROVIDE ( DebugE256PublicKey_x = 0x3ff97428 );
 PROVIDE ( DebugE256PublicKey_y = 0x3ff97408 );
@@ -88,6 +89,8 @@ PROVIDE ( esp_crc8 = 0x4005d144 );
 PROVIDE ( _etext = 0x4000d66c );
 PROVIDE ( ets_readySet_ = 0x3ffe01f0 );
 PROVIDE ( ets_startup_callback = 0x3ffe0404 );
+PROVIDE ( rwip_coex_cfg = 0x3ff9914c );
+PROVIDE ( rwip_priority = 0x3ff99159 );
 PROVIDE ( exc_cause_table = 0x3ff991d0 );
 PROVIDE ( _exit_r = 0x4000bd28 );
 PROVIDE ( free = 0x4000beb8 );
@@ -670,9 +673,14 @@ PROVIDE ( ld_acl_tx = 0x4002ffdc );
 PROVIDE ( ld_acl_rx_sync = 0x4002fbec );
 PROVIDE ( ld_acl_rx_sync2 = 0x4002fd8c );
 PROVIDE ( ld_acl_rx_no_sync = 0x4002fe78 );
+PROVIDE ( ld_acl_clk_isr = 0x40030cf8 );
 PROVIDE ( ld_sco_modify = 0x40031778 );
 PROVIDE ( lm_cmd_cmp_send = 0x40051838 );
 PROVIDE ( ld_sco_frm_cbk = 0x400349dc );
+PROVIDE ( ld_acl_sniff_frm_cbk = 0x4003482c );
+PROVIDE ( ld_inq_end = 0x4003ab48 );
+PROVIDE ( ld_inq_sched = 0x4003aba4 );
+PROVIDE ( ld_inq_frm_cbk = 0x4003ae4c );
 PROVIDE ( r_ld_acl_active_hop_types_get = 0x40036e10 );
 PROVIDE ( r_ld_acl_afh_confirm = 0x40036d40 );
 PROVIDE ( r_ld_acl_afh_prepare = 0x40036c84 );
@@ -1374,8 +1382,8 @@ PROVIDE ( esp_rom_spiflash_attach = 0x40062a6c );
 PROVIDE ( esp_rom_spiflash_config_clk = 0x40062bc8 );
 PROVIDE ( g_rom_spiflash_chip = 0x3ffae270 );
 
-/* 
-These functions are xtos-related (or call xtos-related functions) and do not play well 
+/*
+These functions are xtos-related (or call xtos-related functions) and do not play well
 with multicore FreeRTOS. Where needed, we provide alternatives that are multicore
 compatible. These functions also use a chunk of static RAM, by not using them we can
 allocate that RAM for general use.

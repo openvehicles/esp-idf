@@ -166,7 +166,7 @@ enum HttpStatus_Code
 };
 
 
-static esp_err_t esp_http_client_request_send(esp_http_client_handle_t client);
+static esp_err_t esp_http_client_request_send(esp_http_client_handle_t client, int write_len);
 static esp_err_t esp_http_client_connect(esp_http_client_handle_t client);
 static esp_err_t esp_http_client_send_post_data(esp_http_client_handle_t client);
 
@@ -490,8 +490,18 @@ esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *co
         return NULL;
     }
 
-    if (config->cert_pem) {
+    if (config->use_global_ca_store == true) {
+        esp_transport_ssl_enable_global_ca_store(ssl);
+    } else if (config->cert_pem) {
         esp_transport_ssl_set_cert_data(ssl, config->cert_pem, strlen(config->cert_pem));
+    }
+
+    if (config->client_cert_pem) {
+        esp_transport_ssl_set_client_cert_data(ssl, config->client_cert_pem, strlen(config->client_cert_pem));
+    }
+
+    if (config->client_key_pem) {
+        esp_transport_ssl_set_client_key_data(ssl, config->client_key_pem, strlen(config->client_key_pem));
     }
 #endif
 
@@ -567,6 +577,17 @@ esp_err_t esp_http_client_cleanup(esp_http_client_handle_t client)
     return ESP_OK;
 }
 
+esp_err_t esp_http_client_set_redirection(esp_http_client_handle_t client)
+{
+    if (client == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (client->location == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return esp_http_client_set_url(client, client->location);
+}
+
 static esp_err_t esp_http_check_response(esp_http_client_handle_t client)
 {
     char *auth_header = NULL;
@@ -639,7 +660,9 @@ esp_err_t esp_http_client_set_url(esp_http_client_handle_t client, const char *u
         ESP_LOGE(TAG, "Error parse url %s", url);
         return ESP_ERR_INVALID_ARG;
     }
-    old_host = client->connection_info.host;
+    if (client->connection_info.host) {
+        old_host = strdup(client->connection_info.host);
+    }
     old_port = client->connection_info.port;
 
     if (purl.field_data[UF_HOST].len) {
@@ -651,9 +674,15 @@ esp_err_t esp_http_client_set_url(esp_http_client_handle_t client, const char *u
             && strcasecmp(old_host, (const void *)client->connection_info.host) != 0) {
         ESP_LOGD(TAG, "New host assign = %s", client->connection_info.host);
         if (esp_http_client_set_header(client, "Host", client->connection_info.host) != ESP_OK) {
+            free(old_host);
             return ESP_ERR_NO_MEM;
         }
         esp_http_client_close(client);
+    }
+
+    if (old_host) {
+        free(old_host);
+        old_host = NULL;
     }
 
     if (purl.field_data[UF_SCHEMA].len) {
@@ -817,7 +846,7 @@ esp_err_t esp_http_client_perform(esp_http_client_handle_t client)
                 }
                 /* falls through */
             case HTTP_STATE_CONNECTED:
-                if ((err = esp_http_client_request_send(client)) != ESP_OK) {
+                if ((err = esp_http_client_request_send(client, client->post_len)) != ESP_OK) {
                     if (client->is_async && errno == EAGAIN) {
                         return ESP_ERR_HTTP_EAGAIN;
                     }
@@ -943,6 +972,10 @@ static esp_err_t esp_http_client_connect(esp_http_client_handle_t client)
             int ret = esp_transport_connect_async(client->transport, client->connection_info.host, client->connection_info.port, client->timeout_ms);
             if (ret == ASYNC_TRANS_CONNECT_FAIL) {
                 ESP_LOGE(TAG, "Connection failed");
+                if (strcasecmp(client->connection_info.scheme, "http") == 0) {
+                    ESP_LOGE(TAG, "Asynchronous mode doesn't work for HTTP based connection");
+                    return ESP_ERR_INVALID_ARG;
+                }
                 return ESP_ERR_HTTP_CONNECT;
             } else if (ret == ASYNC_TRANS_CONNECTING) {
                 ESP_LOGD(TAG, "Connection not yet established");
@@ -993,11 +1026,11 @@ static int http_client_prepare_first_line(esp_http_client_handle_t client, int w
     return first_line_len;
 }
 
-static esp_err_t esp_http_client_request_send(esp_http_client_handle_t client)
+static esp_err_t esp_http_client_request_send(esp_http_client_handle_t client, int write_len)
 {
     int first_line_len = 0;
     if (!client->first_line_prepared) {
-        if ((first_line_len = http_client_prepare_first_line(client, client->post_len)) < 0) {
+        if ((first_line_len = http_client_prepare_first_line(client, write_len)) < 0) {
             return first_line_len;
         }
         client->first_line_prepared = true;
@@ -1088,7 +1121,7 @@ esp_err_t esp_http_client_open(esp_http_client_handle_t client, int write_len)
     if ((err = esp_http_client_connect(client)) != ESP_OK) {
         return err;
     }
-    if ((err = esp_http_client_request_send(client)) != ESP_OK) {
+    if ((err = esp_http_client_request_send(client, write_len)) != ESP_OK) {
         return err; 
     }
     return ESP_OK;

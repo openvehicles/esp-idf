@@ -280,8 +280,7 @@ void IRAM_ATTR esp_restart_noos()
     rtc_wdt_set_length_of_reset_signal(RTC_WDT_SYS_RESET_SIG, RTC_WDT_LENGTH_200ns);
     rtc_wdt_set_length_of_reset_signal(RTC_WDT_CPU_RESET_SIG, RTC_WDT_LENGTH_200ns);
     rtc_wdt_set_time(RTC_WDT_STAGE0, 1000);
-    rtc_wdt_enable();
-    rtc_wdt_protect_on();
+    rtc_wdt_flashboot_mode_enable();
 
     // Reset and stall the other CPU.
     // CPU must be reset before stalling, in case it was running a s32c1i
@@ -331,7 +330,7 @@ void IRAM_ATTR esp_restart_noos()
 
     // Reset timer/spi/uart
     DPORT_SET_PERI_REG_MASK(DPORT_PERIP_RST_EN_REG,
-            DPORT_TIMERS_RST | DPORT_SPI01_RST | DPORT_UART_RST);
+            DPORT_TIMERS_RST | DPORT_SPI01_RST | DPORT_UART_RST | DPORT_UART1_RST | DPORT_UART2_RST);
     DPORT_REG_WRITE(DPORT_PERIP_RST_EN_REG, 0);
 
     // Set CPU back to XTAL source, no PLL, same as hard reset

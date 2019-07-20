@@ -43,7 +43,7 @@
 //#include "osi/include/log.h"
 
 #if SMP_INCLUDED == TRUE
-// The temp variable to pass parameter between functions when in the connected event comeback.
+// The temp variable to pass parameter between functions when in the connected event callback.
 static BOOLEAN temp_enhanced = FALSE;
 extern BOOLEAN aes_cipher_msg_auth_code(BT_OCTET16 key, UINT8 *input, UINT16 length,
                                         UINT16 tlen, UINT8 *p_signature);
@@ -66,13 +66,14 @@ extern void gatt_notify_enc_cmpl(BD_ADDR bd_addr);
 **                  bd_name          - Name of the peer device.  NULL if unknown.
 **                  dev_type         - Remote device's device type.
 **                  addr_type        - LE device address type.
+**                  auth_mode        - auth mode
 **
 ** Returns          TRUE if added OK, else FALSE
 **
 *******************************************************************************/
 #if (SMP_INCLUDED == TRUE)
 BOOLEAN BTM_SecAddBleDevice (BD_ADDR bd_addr, BD_NAME bd_name, tBT_DEVICE_TYPE dev_type,
-                             tBLE_ADDR_TYPE addr_type)
+                             tBLE_ADDR_TYPE addr_type, UINT32 auth_mode)
 {
     tBTM_SEC_DEV_REC  *p_dev_rec;
     UINT8               i = 0;
@@ -125,6 +126,7 @@ BOOLEAN BTM_SecAddBleDevice (BD_ADDR bd_addr, BD_NAME bd_name, tBT_DEVICE_TYPE d
     }
     p_dev_rec->device_type |= dev_type;
     p_dev_rec->ble.ble_addr_type = addr_type;
+    p_dev_rec->ble.auth_mode = auth_mode;
 
     memcpy (p_dev_rec->ble.pseudo_addr, bd_addr, BD_ADDR_LEN);
     /* sync up with the Inq Data base*/
@@ -445,25 +447,6 @@ void BTM_BleSetStaticPasskey(BOOLEAN add, UINT32 passkey)
 
 /*******************************************************************************
 **
-** Function         BTM_BleSetAcceptAuthMode
-**
-** Description      This function is called to set only accept specified Authentication
-**
-**
-** Parameters:      enable         - Whether to enable this function
-**
-**                  auth_mode      - Authentication mode
-**
-**
-*******************************************************************************/
-void BTM_BleSetAcceptAuthMode(UINT8 enable, UINT8 auth_mode)
-{
-#if SMP_INCLUDED == TRUE
-    SMP_SetAcceptAuthMode(enable, auth_mode);
-#endif
-}
-/*******************************************************************************
-**
 ** Function         BTM_BleConfirmReply
 **
 ** Description      This function is called after Security Manager submitted
@@ -648,7 +631,7 @@ void BTM_ReadDevInfo (BD_ADDR remote_bda, tBT_DEVICE_TYPE *p_dev_type, tBLE_ADDR
 
     *p_addr_type = BLE_ADDR_PUBLIC;
 
-    if (!p_dev_rec) {  
+    if (!p_dev_rec) {
         *p_dev_type = BT_DEVICE_TYPE_BREDR;
         /* Check with the BT manager if details about remote device are known */
         if (p_inq_info != NULL) {
@@ -904,8 +887,9 @@ tBTM_SEC_ACTION btm_ble_determine_security_act(BOOLEAN is_originator, BD_ADDR bd
             return BTM_SEC_OK;
         }
 
-        if (security_required & BTM_SEC_OUT_MITM)
+        if (security_required & BTM_SEC_OUT_MITM) {
             auth_req |= BTM_LE_AUTH_REQ_MITM;
+        }
     }
     else
     {
@@ -915,8 +899,9 @@ tBTM_SEC_ACTION btm_ble_determine_security_act(BOOLEAN is_originator, BD_ADDR bd
             return BTM_SEC_OK;
         }
 
-        if (security_required & BTM_SEC_IN_MITM)
+        if (security_required & BTM_SEC_IN_MITM) {
             auth_req |= BTM_LE_AUTH_REQ_MITM;
+        }
     }
 
     tBTM_BLE_SEC_REQ_ACT ble_sec_act = BTM_BLE_SEC_REQ_ACT_NONE;
@@ -924,11 +909,13 @@ tBTM_SEC_ACTION btm_ble_determine_security_act(BOOLEAN is_originator, BD_ADDR bd
 
     BTM_TRACE_DEBUG ("%s ble_sec_act %d", __func__ , ble_sec_act);
 
-    if (ble_sec_act == BTM_BLE_SEC_REQ_ACT_DISCARD)
+    if (ble_sec_act == BTM_BLE_SEC_REQ_ACT_DISCARD) {
         return BTM_SEC_ENC_PENDING;
+    }
 
-    if (ble_sec_act == BTM_BLE_SEC_REQ_ACT_NONE)
+    if (ble_sec_act == BTM_BLE_SEC_REQ_ACT_NONE) {
         return BTM_SEC_OK;
+    }
 
     UINT8 sec_flag = 0;
     BTM_GetSecurityFlagsByTransport(bdaddr, &sec_flag, BT_TRANSPORT_LE);
@@ -937,11 +924,13 @@ tBTM_SEC_ACTION btm_ble_determine_security_act(BOOLEAN is_originator, BD_ADDR bd
     BOOLEAN is_key_mitm = FALSE;
     if (sec_flag & (BTM_SEC_FLAG_ENCRYPTED| BTM_SEC_FLAG_LKEY_KNOWN))
     {
-        if (sec_flag & BTM_SEC_FLAG_ENCRYPTED)
+        if (sec_flag & BTM_SEC_FLAG_ENCRYPTED) {
             is_link_encrypted = TRUE;
+        }
 
-        if (sec_flag & BTM_SEC_FLAG_LKEY_AUTHED)
+        if (sec_flag & BTM_SEC_FLAG_LKEY_AUTHED) {
             is_key_mitm = TRUE;
+        }
     }
 
     if (auth_req & BTM_LE_AUTH_REQ_MITM)
@@ -950,16 +939,18 @@ tBTM_SEC_ACTION btm_ble_determine_security_act(BOOLEAN is_originator, BD_ADDR bd
         {
             return BTM_SEC_ENCRYPT_MITM;
         } else {
-            if (is_link_encrypted)
+            if (is_link_encrypted) {
                 return BTM_SEC_OK;
-            else
+            } else {
                 return BTM_SEC_ENCRYPT;
+            }
         }
     } else {
-        if (is_link_encrypted)
+        if (is_link_encrypted) {
             return BTM_SEC_OK;
-        else
+        } else {
             return BTM_SEC_ENCRYPT_NO_MITM;
+        }
     }
 
     return BTM_SEC_OK;
@@ -1029,8 +1020,9 @@ BOOLEAN btm_ble_start_sec_check(BD_ADDR bd_addr, UINT16 psm, BOOLEAN is_originat
             break;
     }
 
-    if (ble_sec_act == BTM_BLE_SEC_NONE)
+    if (ble_sec_act == BTM_BLE_SEC_NONE) {
         return status;
+    }
 
     tL2C_LCB *p_lcb = l2cu_find_lcb_by_bd_addr(bd_addr, BT_TRANSPORT_LE);
     p_lcb->sec_act = sec_act;
@@ -1485,13 +1477,14 @@ tBTM_STATUS btm_ble_set_encryption (BD_ADDR bd_addr, void *p_ref_data, UINT8 lin
                 break;
             }
         }
-
+#if (SMP_SLAVE_CON_PARAMS_UPD_ENABLE == TRUE)
         // already have encrypted information, do not need to update connection parameters
         if(link_role == BTM_ROLE_SLAVE && (p_rec->ble.key_type & BTM_LE_KEY_PENC)) {
             p_rec->ble.skip_update_conn_param = true;
         } else {
-            p_rec->ble.skip_update_conn_param = false;    
+            p_rec->ble.skip_update_conn_param = false;
         }
+#endif
         if (SMP_Pair(bd_addr) == SMP_STARTED) {
             cmd = BTM_CMD_STARTED;
             p_rec->sec_state = BTM_SEC_STATE_AUTHENTICATING;
@@ -1639,7 +1632,7 @@ void btm_ble_link_encrypted(BD_ADDR bd_addr, UINT8 encr_enable)
     /* to notify GATT to send data if any request is pending */
     gatt_notify_enc_cmpl(p_dev_rec->ble.pseudo_addr);
 }
-#endif  ///SMP_INCLUDED == TRUE 
+#endif  ///SMP_INCLUDED == TRUE
 
 
 /*******************************************************************************
@@ -1938,9 +1931,7 @@ void btm_ble_conn_complete(UINT8 *p, UINT16 evt_len, BOOLEAN enhanced)
     UINT8       role, status, bda_type;
     UINT16      handle;
     BD_ADDR     bda;
-#if (BLE_PRIVACY_SPT == TRUE)
     BD_ADDR     local_rpa, peer_rpa;
-#endif  ///BLE_PRIVACY_SPT == TRUE
     UINT16      conn_interval, conn_latency, conn_timeout;
     BOOLEAN     match = FALSE;
     UNUSED(evt_len);
@@ -1951,24 +1942,23 @@ void btm_ble_conn_complete(UINT8 *p, UINT16 evt_len, BOOLEAN enhanced)
     STREAM_TO_BDADDR   (bda, p);
     BTM_TRACE_DEBUG("status = %d, handle = %d, role = %d, bda_type = %d",status,handle,role,bda_type);
     if (status == 0) {
-#if (BLE_PRIVACY_SPT == TRUE )
-        peer_addr_type = bda_type;
-        match = btm_identity_addr_to_random_pseudo (bda, &bda_type, TRUE);
-
         if (enhanced) {
             STREAM_TO_BDADDR   (local_rpa, p);
             STREAM_TO_BDADDR   (peer_rpa, p);
         }
+#if (BLE_PRIVACY_SPT == TRUE )
+        peer_addr_type = bda_type;
+        match = btm_identity_addr_to_random_pseudo (bda, &bda_type, TRUE);
 
         /* possiblly receive connection complete with resolvable random on
            slave role while the device has been paired */
 
         /* It will cause that scanner doesn't send scan request to advertiser
         * which has sent IRK to us and we have stored the IRK in controller.
-        * It is a design problem of hardware. The temporal solution is not to 
-        * send the key to the controller and then resolve the random address in host.
-        * so we need send the real address information to controller to connect. 
-        * Once the connection is successful, resolve device address whether it is 
+        * It is a hardware limitation. The preliminary solution is not to
+        * send key to the controller, but to resolve the random address in host.
+        * so we need send the real address information to controller to connect.
+        * Once the connection is successful, resolve device address whether it is
         * slave or master*/
 
         /* if (!match && role == HCI_ROLE_SLAVE && BTM_BLE_IS_RESOLVE_BDA(bda)) { */
@@ -2013,9 +2003,18 @@ void btm_ble_conn_complete(UINT8 *p, UINT16 evt_len, BOOLEAN enhanced)
             btm_ble_disable_resolving_list(BTM_BLE_RL_ADV, TRUE);
 #endif
         }
+
     }
 
-    btm_ble_update_mode_operation(role, bda, status);
+    BOOLEAN bg_con = btm_ble_update_mode_operation(role, bda, status);
+    if (status != HCI_SUCCESS && !bg_con) {
+        // notify connection failed
+        l2c_link_hci_disc_comp (handle, status);
+#if (SMP_INCLUDED == TRUE)
+        /* Notify security manager */
+        btm_sec_disconnected (handle, status);
+#endif  ///SMP_INCLUDED == TRUE
+    }
 }
 
 

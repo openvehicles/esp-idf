@@ -20,10 +20,16 @@
 #define IDF_PERFORMANCE_MAX_SPI_PER_TRANS_POLLING_NO_DMA                        15
 /* Due to code size & linker layout differences interacting with cache, VFS
    microbenchmark currently runs slower with PSRAM enabled. */
-#define IDF_PERFORMANCE_MAX_VFS_OPEN_WRITE_CLOSE_TIME                           20000
+#define IDF_PERFORMANCE_MAX_VFS_OPEN_WRITE_CLOSE_TIME                           50000
 #define IDF_PERFORMANCE_MAX_VFS_OPEN_WRITE_CLOSE_TIME_PSRAM                     40000
 // throughput performance by iperf
 #define IDF_PERFORMANCE_MIN_TCP_RX_THROUGHPUT                                   50
 #define IDF_PERFORMANCE_MIN_TCP_TX_THROUGHPUT                                   40
 #define IDF_PERFORMANCE_MIN_UDP_RX_THROUGHPUT                                   80
 #define IDF_PERFORMANCE_MIN_UDP_TX_THROUGHPUT                                   50
+// events dispatched per second by event loop library
+#define IDF_PERFORMANCE_MIN_EVENT_DISPATCH                                      25000
+#define IDF_PERFORMANCE_MIN_EVENT_DISPATCH_PSRAM                                21000
+// esp_sha() time to process 32KB of input data from RAM
+#define IDF_PERFORMANCE_MAX_ESP32_TIME_SHA1_32KB 5000
+#define IDF_PERFORMANCE_MAX_ESP32_TIME_SHA512_32KB 4500

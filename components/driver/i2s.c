@@ -86,6 +86,7 @@ typedef struct {
     i2s_mode_t mode;            /*!< I2S Working mode*/
     uint32_t sample_rate;              /*!< I2S sample rate */
     bool use_apll;               /*!< I2S use APLL clock */
+    bool tx_desc_auto_clear;    /*!< I2S auto clear tx descriptor on underflow */
     int fixed_mclk;             /*!< I2S fixed MLCK clock */
 } i2s_obj_t;
 
@@ -248,7 +249,7 @@ static esp_err_t i2s_apll_calculate_fi2s(int rate, int bits_per_sample, int *sdm
         max_rate = i2s_apll_get_fi2s(bits_per_sample, 255, 255, _sdm2, 0);
         min_rate = i2s_apll_get_fi2s(bits_per_sample, 0, 0, _sdm2, 31);
         avg = (max_rate + min_rate)/2;
-        if(abs(avg - rate) < min_diff) {
+        if (abs(avg - rate) < min_diff) {
             min_diff = abs(avg - rate);
             *sdm2 = _sdm2;
         }
@@ -258,9 +259,19 @@ static esp_err_t i2s_apll_calculate_fi2s(int rate, int bits_per_sample, int *sdm
         max_rate = i2s_apll_get_fi2s(bits_per_sample, 255, 255, *sdm2, _odir);
         min_rate = i2s_apll_get_fi2s(bits_per_sample, 0, 0, *sdm2, _odir);
         avg = (max_rate + min_rate)/2;
-        if(abs(avg - rate) < min_diff) {
+        if (abs(avg - rate) < min_diff) {
             min_diff = abs(avg - rate);
             *odir = _odir;
+        }
+    }
+    min_diff = APLL_MAX_FREQ;
+    for (_sdm2 = 4; _sdm2 < 9; _sdm2 ++) {
+        max_rate = i2s_apll_get_fi2s(bits_per_sample, 255, 255, _sdm2, *odir);
+        min_rate = i2s_apll_get_fi2s(bits_per_sample, 0, 0, _sdm2, *odir);
+        avg = (max_rate + min_rate)/2;
+        if (abs(avg - rate) < min_diff) {
+            min_diff = abs(avg - rate);
+            *sdm2 = _sdm2;
         }
     }
 
@@ -502,6 +513,12 @@ static void IRAM_ATTR i2s_intr_handler_default(void *arg)
         // All buffers are empty. This means we have an underflow on our hands.
         if (xQueueIsQueueFullFromISR(p_i2s->tx->queue)) {
             xQueueReceiveFromISR(p_i2s->tx->queue, &dummy, &high_priority_task_awoken);
+            // See if tx descriptor needs to be auto cleared:
+            // This will avoid any kind of noise that may get introduced due to transmission
+            // of previous data from tx descriptor on I2S line.
+            if (p_i2s->tx_desc_auto_clear == true) {
+                memset((void *) dummy, 0, p_i2s->tx->buf_size);
+            }
         }
         xQueueSendFromISR(p_i2s->tx->queue, (void*)(&finish_desc->buf), &high_priority_task_awoken);
         if (p_i2s->i2s_queue) {
@@ -991,6 +1008,7 @@ static esp_err_t i2s_param_config(i2s_port_t i2s_num, const i2s_config_t *i2s_co
     }
 
     p_i2s_obj[i2s_num]->use_apll = i2s_config->use_apll;
+    p_i2s_obj[i2s_num]->tx_desc_auto_clear = i2s_config->tx_desc_auto_clear;
     p_i2s_obj[i2s_num]->fixed_mclk = i2s_config->fixed_mclk;
     return ESP_OK;
 }

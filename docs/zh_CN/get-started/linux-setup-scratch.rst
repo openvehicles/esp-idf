@@ -2,7 +2,9 @@
 从零开始设置 Linux 环境下的工具链
 **********************************
 
-除了直接从 Espressif 官网下载二进制格式的工具链，下面将再介绍一种可替代的办法。如果想要快速设置二进制工具链而不是手动从源码编译，请做好备份，并前往 :doc:`Linux 环境下的设置 <linux-setup>` 章节。
+.. note::
+    
+    安装工具链的标准流程可以通过阅读文档 :doc:`Linux 平台工具链的标准设置 <linux-setup>` 来获得，:ref:`工具链的自定义设置 <get-started-customized-setup>` 章节会介绍哪些情况下我们必须要重新定义工具链。
 
 
 安装必要的工具
@@ -12,11 +14,11 @@
 
 - Ubuntu 和 Debian::
 
-    sudo apt-get install git wget make libncurses-dev flex bison gperf python python-pip python-setuptools python-serial
+    sudo apt-get install gcc git wget make libncurses-dev flex bison gperf python python-pip python-setuptools python-serial python-cryptography python-future python-pyparsing
 
 - Arch::
 
-    sudo pacman -S --needed gcc git make ncurses flex bison gperf python2-pyserial
+    sudo pacman -S --needed gcc git make ncurses flex bison gperf python2-pyserial python2-cryptography python2-future python2-pyparsing
 
 .. note::
 
@@ -47,6 +49,12 @@
   - Arch::
 
         TODO
+
+新建工作目录，然后进入::
+
+  mkdir -p ~/esp
+  cd ~/esp
+
 
 下载 ``crosstool-NG`` 然后编译:
 

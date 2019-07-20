@@ -25,7 +25,7 @@
 extern "C" {
 #endif
 
-#define ESP_BT_CONTROLLER_CONFIG_MAGIC_VAL  0x5A5AA5A5
+#define ESP_BT_CONTROLLER_CONFIG_MAGIC_VAL  0x20190506
 
 /**
  * @brief Bluetooth mode for controller enable/disable
@@ -100,6 +100,9 @@ the adv packet will be discarded until the memory is restored. */
 #define BTDM_CONTROLLER_BR_EDR_MAX_ACL_CONN_LIMIT   7   //Maximum ACL connection limitation
 #define BTDM_CONTROLLER_BR_EDR_MAX_SYNC_CONN_LIMIT  3   //Maximum SCO/eSCO connection limitation
 
+#define BTDM_CONTROLLER_SCO_DATA_PATH_HCI           0   // SCO data is routed to HCI
+#define BTDM_CONTROLLER_SCO_DATA_PATH_PCM           1   // SCO data path is PCM
+
 #define BT_CONTROLLER_INIT_CONFIG_DEFAULT() {                              \
     .controller_task_stack_size = ESP_TASK_BT_CONTROLLER_STACK,            \
     .controller_task_prio = ESP_TASK_BT_CONTROLLER_PRIO,                   \
@@ -114,6 +117,7 @@ the adv packet will be discarded until the memory is restored. */
     .mode = BTDM_CONTROLLER_MODE_EFF,                                      \
     .ble_max_conn = CONFIG_BTDM_CONTROLLER_BLE_MAX_CONN_EFF,               \
     .bt_max_acl_conn = CONFIG_BTDM_CONTROLLER_BR_EDR_MAX_ACL_CONN_EFF,     \
+    .bt_sco_datapath = CONFIG_BTDM_CONTROLLER_BR_EDR_SCO_DATA_PATH_EFF,    \
     .bt_max_sync_conn = CONFIG_BTDM_CONTROLLER_BR_EDR_MAX_SYNC_CONN_EFF,   \
     .magic = ESP_BT_CONTROLLER_CONFIG_MAGIC_VAL,                           \
 };
@@ -144,6 +148,7 @@ typedef struct {
     uint8_t mode;                           /*!< Controller mode: BR/EDR, BLE or Dual Mode */
     uint8_t ble_max_conn;                   /*!< BLE maximum connection numbers */
     uint8_t bt_max_acl_conn;                /*!< BR/EDR maximum ACL connection numbers */
+    uint8_t bt_sco_datapath;                /*!< SCO data path, i.e. HCI or PCM module */
     /*
      * Following parameters can not be configured runtime when call esp_bt_controller_init()
      * It will be overwrite with a constant value which in menuconfig or from a macro.
@@ -326,8 +331,12 @@ bool esp_vhci_host_check_send_available(void);
 
 /** @brief esp_vhci_host_send_packet
  * host send packet to controller
+ *
+ * Should not call this function from within a critical section
+ * or when the scheduler is suspended.
+ *
  * @param data the packet point
- *,@param len the packet length
+ * @param len the packet length
  */
 void esp_vhci_host_send_packet(uint8_t *data, uint16_t len);
 
@@ -405,7 +414,6 @@ esp_err_t esp_bt_mem_release(esp_bt_mode_t mode);
  *
  * For ORIG mode:
  * Bluetooth modem sleep is enabled in controller start up by default if CONFIG_BTDM_CONTROLLER_MODEM_SLEEP is set and "ORIG mode" is selected. In ORIG modem sleep mode, bluetooth controller will switch off some components and pause to work every now and then, if there is no event to process; and wakeup according to the scheduled interval and resume the work. It can also wakeup earlier upon external request using function "esp_bt_controller_wakeup_request".
- * Note that currently there is problem in the combination use of bluetooth modem sleep and Dynamic Frequency Scaling(DFS). So do not enable DFS if bluetooth modem sleep is in use.
  *
  * @return
  *                  - ESP_OK : success
@@ -454,11 +462,11 @@ void esp_bt_controller_wakeup_request(void);
 
 /**
  * @brief Manually clear scan duplicate list
- * 
+ *
  * Note that scan duplicate list will be automatically cleared when the maximum amount of device in the filter is reached
  * the amount of device in the filter can be configured in menuconfig.
- * 
- * 
+ *
+ *
  * @return
  *                  - ESP_OK : success
  *                  - other  : failed

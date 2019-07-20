@@ -161,6 +161,7 @@ typedef enum {
     ESP_GAP_BLE_GET_BOND_DEV_COMPLETE_EVT,                  /*!< When get the bond device list complete, the event comes */
     ESP_GAP_BLE_READ_RSSI_COMPLETE_EVT,                     /*!< When read the rssi complete, the event comes */
     ESP_GAP_BLE_UPDATE_WHITELIST_COMPLETE_EVT,              /*!< When add or remove whitelist complete, the event comes */
+    ESP_GAP_BLE_UPDATE_DUPLICATE_EXCEPTIONAL_LIST_COMPLETE_EVT,  /*!< When update duplicate exceptional list complete, the event comes */
     ESP_GAP_BLE_EVT_MAX,
 } esp_gap_ble_cb_event_t;
 /// This is the old name, just for backwards compatibility
@@ -286,7 +287,7 @@ typedef struct {
     esp_ble_adv_type_t      adv_type;           /*!< Advertising type */
     esp_ble_addr_type_t     own_addr_type;      /*!< Owner bluetooth device address type */
     esp_bd_addr_t           peer_addr;          /*!< Peer device bluetooth device address */
-    esp_ble_addr_type_t     peer_addr_type;     /*!< Peer device bluetooth device address type */
+    esp_ble_addr_type_t     peer_addr_type;     /*!< Peer device bluetooth device address type, only support public address type and random address type */
     esp_ble_adv_channel_t   channel_map;        /*!< Advertising channel map */
     esp_ble_adv_filter_t    adv_filter_policy;  /*!< Advertising filter policy */
 } esp_ble_adv_params_t;
@@ -303,9 +304,9 @@ typedef struct {
                                                     Value of 0xFFFF indicates no specific minimum.
                                                     Values not defined above are reserved for future use.*/
 
-    int                     max_interval;           /*!< Advertising data show slave preferred connection max interval. 
+    int                     max_interval;           /*!< Advertising data show slave preferred connection max interval.
                                                     The connection interval in the following manner:
-                                                    connIntervalmax = Conn_Interval_Max * 1.25 ms 
+                                                    connIntervalmax = Conn_Interval_Max * 1.25 ms
                                                     Conn_Interval_Max range: 0x0006 to 0x0C80
                                                     Conn_Interval_Max shall be equal to or greater than the Conn_Interval_Min.
                                                     Value of 0xFFFF indicates no specific maximum.
@@ -366,8 +367,8 @@ typedef struct {
                                                       Range: 0x0004 to 0x4000 Default: 0x0010 (10 ms)
                                                       Time = N * 0.625 msec
                                                       Time Range: 2.5 msec to 10240 msec */
-    esp_ble_scan_duplicate_t  scan_duplicate;       /*!< The Scan_Duplicates parameter controls whether the Link Layer should filter out 
-                                                        duplicate advertising reports (BLE_SCAN_DUPLICATE_ENABLE) to the Host, or if the Link Layer should generate 
+    esp_ble_scan_duplicate_t  scan_duplicate;       /*!< The Scan_Duplicates parameter controls whether the Link Layer should filter out
+                                                        duplicate advertising reports (BLE_SCAN_DUPLICATE_ENABLE) to the Host, or if the Link Layer should generate
                                                         advertising reports for each packet received */
 } esp_ble_scan_params_t;
 
@@ -552,6 +553,7 @@ typedef enum {
     ESP_GAP_SEARCH_DISC_CMPL_EVT           = 4,      /*!< Discovery complete. */
     ESP_GAP_SEARCH_DI_DISC_CMPL_EVT        = 5,      /*!< Discovery complete. */
     ESP_GAP_SEARCH_SEARCH_CANCEL_CMPL_EVT  = 6,      /*!< Search cancelled */
+    ESP_GAP_SEARCH_INQ_DISCARD_NUM_EVT     = 7,      /*!< The number of pkt discarded by flow control */
 } esp_gap_search_evt_t;
 
 /**
@@ -570,6 +572,34 @@ typedef enum{
     ESP_BLE_WHITELIST_REMOVE     = 0X00,    /*!< remove mac from whitelist */
     ESP_BLE_WHITELIST_ADD        = 0X01,    /*!< add address to whitelist */
 }esp_ble_wl_opration_t;
+
+typedef enum {
+    ESP_BLE_DUPLICATE_EXCEPTIONAL_LIST_ADD      = 0,  /*!< Add device info into duplicate scan exceptional list */
+    ESP_BLE_DUPLICATE_EXCEPTIONAL_LIST_REMOVE,        /*!< Remove device info from duplicate scan exceptional list */
+    ESP_BLE_DUPLICATE_EXCEPTIONAL_LIST_CLEAN,         /*!< Clean duplicate scan exceptional list */
+} esp_bt_duplicate_exceptional_subcode_type_t;
+
+#define BLE_BIT(n) (1UL<<(n))
+
+typedef enum {
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_INFO_ADV_ADDR       = 0,  /*!< BLE advertising address , device info will be added into ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_ADDR_LIST */
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_INFO_MESH_LINK_ID,        /*!< BLE mesh link ID, it is for BLE mesh, device info will be added into ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_MESH_LINK_ID_LIST */
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_INFO_MESH_BEACON_TYPE,    /*!< BLE mesh beacon AD type, the format is | Len | 0x2B | Beacon Type | Beacon Data | */     
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_INFO_MESH_PROV_SRV_ADV,   /*!< BLE mesh provisioning service uuid, the format is | 0x02 | 0x01 | flags | 0x03 | 0x03 | 0x1827 | .... |` */
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_INFO_MESH_PROXY_SRV_ADV,  /*!< BLE mesh adv with proxy service uuid, the format is | 0x02 | 0x01 | flags | 0x03 | 0x03 | 0x1828 | .... |` */
+} esp_ble_duplicate_exceptional_info_type_t;
+
+typedef enum {
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_ADDR_LIST                  = BLE_BIT(0),             /*!< duplicate scan exceptional addr list */
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_MESH_LINK_ID_LIST          = BLE_BIT(1),             /*!< duplicate scan exceptional mesh link ID list */
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_MESH_BEACON_TYPE_LIST      = BLE_BIT(2),             /*!< duplicate scan exceptional mesh beacon type list */
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_MESH_PROV_SRV_ADV_LIST     = BLE_BIT(3),             /*!< duplicate scan exceptional mesh adv with provisioning service uuid */
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_MESH_PROXY_SRV_ADV_LIST    = BLE_BIT(4),             /*!< duplicate scan exceptional mesh adv with provisioning service uuid */
+    ESP_BLE_DUPLICATE_SCAN_EXCEPTIONAL_ALL_LIST                   = 0xFFFF,                 /*!< duplicate scan exceptional all list */
+} esp_duplicate_scan_exceptional_list_type_t;
+
+typedef uint8_t esp_duplicate_info_t[ESP_BD_ADDR_LEN];
+
 /**
  * @brief Gap callback parameters union
  */
@@ -607,6 +637,7 @@ typedef union {
         int num_resps;                              /*!< Scan result number */
         uint8_t adv_data_len;                       /*!< Adv data length */
         uint8_t scan_rsp_len;                       /*!< Scan response length */
+        uint32_t num_dis;                          /*!< The number of discard packets */
     } scan_rst;                                     /*!< Event parameter of ESP_GAP_BLE_SCAN_RESULT_EVT */
     /**
      * @brief ESP_GAP_BLE_ADV_DATA_RAW_SET_COMPLETE_EVT
@@ -715,6 +746,15 @@ typedef union {
         esp_bt_status_t status;                     /*!< Indicate the add or remove whitelist operation success status */
         esp_ble_wl_opration_t wl_opration;          /*!< The value is ESP_BLE_WHITELIST_ADD if add address to whitelist operation success, ESP_BLE_WHITELIST_REMOVE if remove address from the whitelist operation success */
     } update_whitelist_cmpl;                        /*!< Event parameter of ESP_GAP_BLE_UPDATE_WHITELIST_COMPLETE_EVT */
+    /**
+     * @brief ESP_GAP_BLE_UPDATE_DUPLICATE_EXCEPTIONAL_LIST_COMPLETE_EVT
+     */
+    struct ble_update_duplicate_exceptional_list_cmpl_evt_param {
+        esp_bt_status_t status;                     /*!< Indicate update duplicate scan exceptional list operation success status */
+        uint8_t         subcode;                    /*!< Define in esp_bt_duplicate_exceptional_subcode_type_t */
+        uint16_t         length;                     /*!< The length of device_info */
+        esp_duplicate_info_t device_info;           /*!< device information, when subcode is ESP_BLE_DUPLICATE_EXCEPTIONAL_LIST_CLEAN, the value is invalid */
+    } update_duplicate_exceptional_list_cmpl;       /*!< Event parameter of ESP_GAP_BLE_UPDATE_DUPLICATE_EXCEPTIONAL_LIST_COMPLETE_EVT */
 } esp_ble_gap_cb_param_t;
 
 /**
@@ -962,8 +1002,7 @@ esp_err_t esp_ble_gap_get_local_used_addr(esp_bd_addr_t local_used_addr, uint8_t
  * @param[in]       type   - finding ADV data type
  * @param[out]      length - return the length of ADV data not including type
  *
- * @return          - ESP_OK : success
- *                  - other  : failed
+ * @return          pointer of ADV data
  *
  */
 uint8_t *esp_ble_resolve_adv_data(uint8_t *adv_data, uint8_t type, uint8_t *length);
@@ -1007,6 +1046,45 @@ esp_err_t esp_ble_gap_config_scan_rsp_data_raw(uint8_t *raw_data, uint32_t raw_d
  *                  - other  : failed
  */
 esp_err_t esp_ble_gap_read_rssi(esp_bd_addr_t remote_addr);
+
+/**
+ * @brief           This function is called to add a device info into the duplicate scan exceptional list.
+ *
+ *
+ * @param[in]       type: device info type, it is defined in esp_ble_duplicate_exceptional_info_type_t
+ *                  when type is MESH_BEACON_TYPE, MESH_PROV_SRV_ADV or MESH_PROXY_SRV_ADV , device_info is invalid.
+ * @param[in]       device_info: the device information.
+ * @return
+ *                  - ESP_OK : success
+ *                  - other  : failed
+ */
+esp_err_t esp_ble_gap_add_duplicate_scan_exceptional_device(esp_ble_duplicate_exceptional_info_type_t type, esp_duplicate_info_t device_info);
+
+/**
+ * @brief           This function is called to remove a device info from the duplicate scan exceptional list.
+ *
+ *
+ * @param[in]       type: device info type, it is defined in esp_ble_duplicate_exceptional_info_type_t
+ *                  when type is MESH_BEACON_TYPE, MESH_PROV_SRV_ADV or MESH_PROXY_SRV_ADV , device_info is invalid.
+ * @param[in]       device_info: the device information.
+ * @return
+ *                  - ESP_OK : success
+ *                  - other  : failed
+ */
+esp_err_t esp_ble_gap_remove_duplicate_scan_exceptional_device(esp_ble_duplicate_exceptional_info_type_t type, esp_duplicate_info_t device_info);
+
+/**
+ * @brief           This function is called to clean the duplicate scan exceptional list.
+ *                  This API will delete all device information in the duplicate scan exceptional list.
+ *
+ *
+ * @param[in]       list_type: duplicate scan exceptional list type, the value can be one or more of esp_duplicate_scan_exceptional_list_type_t.
+ *
+ * @return
+ *                  - ESP_OK : success
+ *                  - other  : failed
+ */
+esp_err_t esp_ble_gap_clean_duplicate_scan_exceptional_list(esp_duplicate_scan_exceptional_list_type_t list_type);
 
 #if (SMP_INCLUDED == TRUE)
 /**

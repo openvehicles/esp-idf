@@ -156,7 +156,7 @@ function run_tests()
     idf.py build
     take_build_snapshot
     # need to actually change config, or cmake is too smart to rebuild
-    sed -i s/CONFIG_FREERTOS_UNICORE=/CONFIG_FREERTOS_UNICORE=y/ sdkconfig
+    sed -i s/^\#\ CONFIG_FREERTOS_UNICORE\ is\ not\ set/CONFIG_FREERTOS_UNICORE=y/ sdkconfig
     idf.py build
     # check the sdkconfig.h file was rebuilt
     assert_rebuilt config/sdkconfig.h
@@ -211,6 +211,52 @@ function run_tests()
          cmake -G Ninja .. && ninja) || failure "Ninja build failed"
     mv CMakeLists.bak CMakeLists.txt
     assert_built ${APP_BINS} ${BOOTLOADER_BINS} ${PARTITION_BIN}
+
+    print_status "sdkconfig should have contents both files: sdkconfig and sdkconfig.defaults"
+    idf.py clean > /dev/null;
+    idf.py fullclean > /dev/null;
+    rm -f sdkconfig.defaults;
+    rm -f sdkconfig;
+    echo "CONFIG_PARTITION_TABLE_OFFSET=0x10000" >> sdkconfig.defaults;
+    echo "CONFIG_PARTITION_TABLE_TWO_OTA=y" >> sdkconfig;
+    idf.py reconfigure > /dev/null;
+    grep "CONFIG_PARTITION_TABLE_OFFSET=0x10000" sdkconfig || failure "The define from sdkconfig.defaults should be into sdkconfig"
+    grep "CONFIG_PARTITION_TABLE_TWO_OTA=y" sdkconfig || failure "The define from sdkconfig should be into sdkconfig"
+    rm sdkconfig;
+    rm sdkconfig.defaults;
+
+    print_status "Building a project with CMake and PSRAM workaround, all files compile with workaround"
+    rm -rf build
+    echo "CONFIG_SPIRAM_SUPPORT=y" >> sdkconfig.defaults
+    echo "CONFIG_SPIRAM_CACHE_WORKAROUND=y" >> sdkconfig.defaults
+    # note: we do 'reconfigure' here, as we just need to run cmake
+    idf.py reconfigure -D SDKCONFIG_DEFAULTS="`pwd`/sdkconfig.defaults"
+    grep -q '"command"' build/compile_commands.json || failure "compile_commands.json missing or has no no 'commands' in it"
+    (grep '"command"' build/compile_commands.json | grep -v mfix-esp32-psram-cache-issue) && failure "All commands in compile_commands.json should use PSRAM cache workaround"
+    rm sdkconfig.defaults
+
+    print_status "Make sure a full build never runs '/usr/bin/env python' or similar"
+    OLDPATH="$PATH"
+    PYTHON="$(which python)"
+    rm -rf build
+    cat > ./python << EOF
+    #!/bin/sh
+    echo "The build system has executed '/usr/bin/env python' or similar"
+    exit 1
+EOF
+    chmod +x ./python
+    export PATH="$(pwd):$PATH"
+    ${PYTHON} $IDF_PATH/tools/idf.py build || failure "build failed"
+    export PATH="$OLDPATH"
+    rm ./python
+
+    print_status "Custom bootloader overrides original"
+    clean_build_dir
+    (mkdir components && cd components && cp -r $IDF_PATH/components/bootloader .)
+    idf.py build
+    grep "$PWD/components/bootloader/subproject/main/bootloader_start.c" build/bootloader/compile_commands.json \
+        || failure "Custom bootloader source files should be built instead of the original's"
+    rm -rf components
 
     print_status "All tests completed"
     if [ -n "${FAILURES}" ]; then

@@ -76,7 +76,7 @@ An example project directory tree might look like this::
 
 This example "myProject" contains the following elements:
 
-- A top-level project Makefile. This Makefile set the ``PROJECT_NAME`` variable and (optionally) defines
+- A top-level project Makefile. This Makefile sets the ``PROJECT_NAME`` variable and (optionally) defines
   other project-wide make variables. It includes the core ``$(IDF_PATH)/make/project.mk`` makefile which
   implements the rest of the ESP-IDF build system.
 
@@ -586,6 +586,7 @@ $(COMPONENT_LIBRARY) for the project make process to link into the app binary.
 (Actually, even this is not strictly necessary - if the COMPONENT_ADD_LDFLAGS variable
 is overridden then the component can instruct the linker to link other binaries instead.)
 
+.. note:: When using an external build process with PSRAM, remember to add ``-mfix-esp32-psram-cache-issue`` to the C compiler arguments. See :ref:`CONFIG_SPIRAM_CACHE_WORKAROUND` for details of this flag.
 
 .. _esp-idf-template: https://github.com/espressif/esp-idf-template
 .. _GNU Make Manual: https://www.gnu.org/software/make/manual/make.html

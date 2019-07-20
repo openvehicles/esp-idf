@@ -72,7 +72,7 @@ static esp_err_t cmd_get_status_handler(WiFiConfigPayload *req,
     resp_get_status__init(resp_payload);
 
     wifi_prov_config_get_data_t resp_data;
-    if (h->get_status_handler(&resp_data) == ESP_OK) {
+    if (h->get_status_handler(&resp_data, &h->ctx) == ESP_OK) {
         if (resp_data.wifi_state == WIFI_PROV_STA_CONNECTING) {
             resp_payload->sta_state = WIFI_STATION_STATE__Connecting;
             resp_payload->state_case = RESP_GET_STATUS__STATE_CONNECTED;
@@ -151,15 +151,36 @@ static esp_err_t cmd_set_config_handler(WiFiConfigPayload *req,
 
     wifi_prov_config_set_data_t req_data;
     memset(&req_data, 0, sizeof(req_data));
-    memcpy(req_data.ssid, req->cmd_set_config->ssid.data,
-           req->cmd_set_config->ssid.len);
-    memcpy(req_data.password, req->cmd_set_config->passphrase.data,
-           req->cmd_set_config->passphrase.len);
-    memcpy(req_data.bssid, req->cmd_set_config->bssid.data,
-           req->cmd_set_config->bssid.len);
-    req_data.channel = req->cmd_set_config->channel;
-    if (h->set_config_handler(&req_data) == ESP_OK) {
-        resp_payload->status = STATUS__Success;
+
+    /* Check arguments provided in protobuf packet:
+     * - SSID / Passphrase string length must be within the standard limits
+     * - BSSID must either be NULL or have length equal to that imposed by the standard
+     * If any of these conditions are not satisfied, don't invoke the handler and
+     * send error status without closing connection */
+    resp_payload->status = STATUS__InvalidArgument;
+    if (req->cmd_set_config->bssid.len != 0 &&
+        req->cmd_set_config->bssid.len != sizeof(req_data.bssid)) {
+        ESP_LOGD(TAG, "Received invalid BSSID");
+    } else if (req->cmd_set_config->ssid.len >= sizeof(req_data.ssid)) {
+        ESP_LOGD(TAG, "Received invalid SSID");
+    } else if (req->cmd_set_config->passphrase.len >= sizeof(req_data.password)) {
+        ESP_LOGD(TAG, "Received invalid Passphrase");
+    } else {
+        /* The received SSID and Passphrase are not NULL terminated so
+         * we memcpy over zeroed out arrays. Above length checks ensure
+         * that there is atleast 1 extra byte for null termination */
+        memcpy(req_data.ssid, req->cmd_set_config->ssid.data,
+               req->cmd_set_config->ssid.len);
+        memcpy(req_data.password, req->cmd_set_config->passphrase.data,
+               req->cmd_set_config->passphrase.len);
+        memcpy(req_data.bssid, req->cmd_set_config->bssid.data,
+               req->cmd_set_config->bssid.len);
+        req_data.channel = req->cmd_set_config->channel;
+        if (h->set_config_handler(&req_data, &h->ctx) == ESP_OK) {
+            resp_payload->status = STATUS__Success;
+        } else {
+            resp_payload->status = STATUS__InternalError;
+        }
     }
 
     resp->payload_case = WI_FI_CONFIG_PAYLOAD__PAYLOAD_RESP_SET_CONFIG;
@@ -185,10 +206,10 @@ static esp_err_t cmd_apply_config_handler(WiFiConfigPayload *req,
 
     resp_apply_config__init(resp_payload);
 
-    if (h->apply_config_handler() == ESP_OK) {
+    if (h->apply_config_handler(&h->ctx) == ESP_OK) {
         resp_payload->status = STATUS__Success;
     } else {
-        resp_payload->status = STATUS__InvalidArgument;
+        resp_payload->status = STATUS__InternalError;
     }
 
     resp->payload_case = WI_FI_CONFIG_PAYLOAD__PAYLOAD_RESP_APPLY_CONFIG;

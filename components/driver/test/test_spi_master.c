@@ -507,7 +507,6 @@ TEST_CASE("SPI Master no response when switch from host1 (HSPI) to host2 (VSPI)"
     TEST_ASSERT(spi_bus_free(host) == ESP_OK);
 }
 
-IRAM_ATTR  static uint32_t data_iram[80];
 DRAM_ATTR  static uint32_t data_dram[80]={0};
 //force to place in code area.
 static const uint8_t data_drom[320+3] = {
@@ -539,17 +538,29 @@ static const uint8_t data_drom[320+3] = {
 #define PIN_NUM_RST  18
 #define PIN_NUM_BCKL 5
 
+
 TEST_CASE("SPI Master DMA test, TX and RX in different regions", "[spi]")
 {
 #ifdef CONFIG_SPIRAM_SUPPORT
     //test psram if enabled
     ESP_LOGI(TAG, "testing PSRAM...");
-    uint32_t* data_malloc = (uint32_t*)heap_caps_calloc(1, 324, MALLOC_CAP_SPIRAM);
+    uint32_t* data_malloc = (uint32_t*)heap_caps_malloc(324, MALLOC_CAP_SPIRAM);
+    TEST_ASSERT(esp_ptr_external_ram(data_malloc));
 #else
-    uint32_t* data_malloc = (uint32_t*)heap_caps_calloc(1, 324, MALLOC_CAP_DMA);
+    uint32_t* data_malloc = (uint32_t*)heap_caps_malloc(324, MALLOC_CAP_DMA);
+    TEST_ASSERT(esp_ptr_in_dram(data_malloc));
 #endif
-
     TEST_ASSERT(data_malloc != NULL);
+
+    //refer to soc_memory_layout.c
+    uint32_t* data_iram = (uint32_t*)heap_caps_malloc(324, MALLOC_CAP_EXEC);
+    TEST_ASSERT(data_iram != NULL);
+
+    ESP_LOGI(TAG, "iram: %p, dram: %p", data_iram, data_dram);
+    ESP_LOGI(TAG, "drom: %p, malloc: %p", data_drom, data_malloc);
+    TEST_ASSERT(esp_ptr_in_dram(data_dram));
+    TEST_ASSERT(esp_ptr_in_iram(data_iram));
+    TEST_ASSERT(esp_ptr_in_drom(data_drom));
 
     srand(52);
     for (int i = 0; i < 320/4; i++) {
@@ -577,8 +588,6 @@ TEST_CASE("SPI Master DMA test, TX and RX in different regions", "[spi]")
     static spi_transaction_t trans[TEST_REGION_SIZE];
     int x;
 
-    ESP_LOGI(TAG, "iram: %p, dram: %p", data_iram, data_dram);
-    ESP_LOGI(TAG, "drom: %p, malloc: %p", data_drom, data_malloc);
 
     memset(trans, 0, sizeof(trans));
 
@@ -619,6 +628,7 @@ TEST_CASE("SPI Master DMA test, TX and RX in different regions", "[spi]")
     TEST_ASSERT(spi_bus_remove_device(spi) == ESP_OK);
     TEST_ASSERT(spi_bus_free(HSPI_HOST) == ESP_OK);
     free(data_malloc);
+    free(data_iram);
 }
 
 //this part tests 3 DMA issues in master mode, full-duplex in IDF2.1
@@ -813,6 +823,65 @@ static void task_slave(void* arg)
 
 #define TEST_SPI_HOST   HSPI_HOST
 #define TEST_SLAVE_HOST VSPI_HOST
+
+static esp_err_t test_master_pins(int mosi, int miso, int sclk, int cs)
+{
+    esp_err_t ret;
+    spi_bus_config_t cfg = SPI_BUS_TEST_DEFAULT_CONFIG();
+    cfg.mosi_io_num = mosi;
+    cfg.miso_io_num = miso;
+    cfg.sclk_io_num = sclk;
+
+    spi_device_interface_config_t master_cfg = SPI_DEVICE_TEST_DEFAULT_CONFIG();
+    master_cfg.spics_io_num = cs;
+
+    ret = spi_bus_initialize(TEST_SPI_HOST, &cfg, 1);
+    if (ret != ESP_OK) return ret;
+
+    spi_device_handle_t spi;
+    ret = spi_bus_add_device(TEST_SPI_HOST, &master_cfg, &spi);
+    if (ret != ESP_OK) {
+        spi_bus_free(TEST_SPI_HOST);
+        return ret;
+    }
+
+    spi_bus_remove_device(spi);
+    spi_bus_free(TEST_SPI_HOST);
+    return ESP_OK;
+}
+
+static esp_err_t test_slave_pins(int mosi, int miso, int sclk, int cs)
+{
+    esp_err_t ret;
+    spi_bus_config_t cfg = SPI_BUS_TEST_DEFAULT_CONFIG();
+    cfg.mosi_io_num = mosi;
+    cfg.miso_io_num = miso;
+    cfg.sclk_io_num = sclk;
+
+    spi_slave_interface_config_t slave_cfg = SPI_SLAVE_TEST_DEFAULT_CONFIG();
+    slave_cfg.spics_io_num = cs;
+
+    ret = spi_slave_initialize(TEST_SLAVE_HOST, &cfg, &slave_cfg, 1);
+    if (ret != ESP_OK) return ret;
+
+    spi_slave_free(TEST_SLAVE_HOST);
+    return ESP_OK;
+}
+
+TEST_CASE("spi placed on input-only pins", "[spi]")
+{
+    TEST_ESP_OK(test_master_pins(PIN_NUM_MOSI, PIN_NUM_MISO, PIN_NUM_CLK, PIN_NUM_CS));
+    TEST_ASSERT(test_master_pins(34, PIN_NUM_MISO, PIN_NUM_CLK, PIN_NUM_CS)!=ESP_OK);
+    TEST_ESP_OK(test_master_pins(PIN_NUM_MOSI, 34, PIN_NUM_CLK, PIN_NUM_CS));
+    TEST_ASSERT(test_master_pins(PIN_NUM_MOSI, PIN_NUM_MISO, 34, PIN_NUM_CS)!=ESP_OK);
+    TEST_ASSERT(test_master_pins(PIN_NUM_MOSI, PIN_NUM_MISO, PIN_NUM_CLK, 34)!=ESP_OK);
+
+    TEST_ESP_OK(test_slave_pins(PIN_NUM_MOSI, PIN_NUM_MISO, PIN_NUM_CLK, PIN_NUM_CS));
+    TEST_ESP_OK(test_slave_pins(34, PIN_NUM_MISO, PIN_NUM_CLK, PIN_NUM_CS));
+    TEST_ASSERT(test_slave_pins(PIN_NUM_MOSI, 34, PIN_NUM_CLK, PIN_NUM_CS)!=ESP_OK);
+    TEST_ESP_OK(test_slave_pins(PIN_NUM_MOSI, PIN_NUM_MISO, 34, PIN_NUM_CS));
+    TEST_ESP_OK(test_slave_pins(PIN_NUM_MOSI, PIN_NUM_MISO, PIN_NUM_CLK, 34));
+}
 
 static uint8_t bitswap(uint8_t in)
 {
@@ -1350,9 +1419,26 @@ static void sorted_array_insert(uint32_t* array, int* size, uint32_t item)
 
 #define TEST_TIMES  11
 
-TEST_CASE("spi_speed","[spi]")
+static IRAM_ATTR void spi_transmit_measure(spi_device_handle_t spi, spi_transaction_t* trans, uint32_t* t_flight)
 {
     RECORD_TIME_PREPARE();
+    spi_device_transmit(spi, trans); // prime the flash cache
+    RECORD_TIME_START();
+    spi_device_transmit(spi, trans);
+    RECORD_TIME_END(t_flight);
+}
+
+static IRAM_ATTR void spi_transmit_polling_measure(spi_device_handle_t spi, spi_transaction_t* trans, uint32_t* t_flight)
+{
+    RECORD_TIME_PREPARE();
+    spi_device_polling_transmit(spi, trans); // prime the flash cache
+    RECORD_TIME_START();
+    spi_device_polling_transmit(spi, trans);
+    RECORD_TIME_END(t_flight);
+}
+
+TEST_CASE("spi_speed","[spi]")
+{
     uint32_t t_flight;
     //to get rid of the influence of randomly interrupts, we measured the performance by median value
     uint32_t t_flight_sorted[TEST_TIMES];
@@ -1372,16 +1458,13 @@ TEST_CASE("spi_speed","[spi]")
     //record flight time by isr, with DMA
     t_flight_num = 0;
     for (int i = 0; i < TEST_TIMES; i++) {
-        spi_device_transmit(spi, &trans); // prime the flash cache
-        RECORD_TIME_START();
-        spi_device_transmit(spi, &trans);
-        RECORD_TIME_END(&t_flight);
+        spi_transmit_measure(spi, &trans, &t_flight);
         sorted_array_insert(t_flight_sorted, &t_flight_num, t_flight);
     }
-    TEST_PERFORMANCE_LESS_THAN(SPI_PER_TRANS_NO_POLLING, "%d us", t_flight_sorted[(TEST_TIMES+1)/2]);
     for (int i = 0; i < TEST_TIMES; i++) {
         ESP_LOGI(TAG, "%d", t_flight_sorted[i]);
     }
+    TEST_PERFORMANCE_LESS_THAN(SPI_PER_TRANS_NO_POLLING, "%d us", t_flight_sorted[(TEST_TIMES+1)/2]);
 
     //acquire the bus to send polling transactions faster
     ret = spi_device_acquire_bus(spi, portMAX_DELAY);
@@ -1390,16 +1473,13 @@ TEST_CASE("spi_speed","[spi]")
     //record flight time by polling and with DMA
     t_flight_num = 0;
     for (int i = 0; i < TEST_TIMES; i++) {
-        spi_device_polling_transmit(spi, &trans); // prime the flash cache
-        RECORD_TIME_START();
-        spi_device_polling_transmit(spi, &trans);
-        RECORD_TIME_END(&t_flight);
+        spi_transmit_polling_measure(spi, &trans, &t_flight);
         sorted_array_insert(t_flight_sorted, &t_flight_num, t_flight);
     }
-    TEST_PERFORMANCE_LESS_THAN(SPI_PER_TRANS_POLLING, "%d us", t_flight_sorted[(TEST_TIMES+1)/2]);
     for (int i = 0; i < TEST_TIMES; i++) {
         ESP_LOGI(TAG, "%d", t_flight_sorted[i]);
     }
+    TEST_PERFORMANCE_LESS_THAN(SPI_PER_TRANS_POLLING, "%d us", t_flight_sorted[(TEST_TIMES+1)/2]);
 
     //release the bus
     spi_device_release_bus(spi);
@@ -1410,16 +1490,13 @@ TEST_CASE("spi_speed","[spi]")
     //record flight time by isr, without DMA
     t_flight_num = 0;
     for (int i = 0; i < TEST_TIMES; i++) {
-        spi_device_transmit(spi, &trans); // prime the flash cache
-        RECORD_TIME_START();
-        spi_device_transmit(spi, &trans);
-        RECORD_TIME_END(&t_flight);
+        spi_transmit_measure(spi, &trans, &t_flight);
         sorted_array_insert(t_flight_sorted, &t_flight_num, t_flight);
     }
-    TEST_PERFORMANCE_LESS_THAN( SPI_PER_TRANS_NO_POLLING_NO_DMA, "%d us", t_flight_sorted[(TEST_TIMES+1)/2]);
     for (int i = 0; i < TEST_TIMES; i++) {
         ESP_LOGI(TAG, "%d", t_flight_sorted[i]);
     }
+    TEST_PERFORMANCE_LESS_THAN( SPI_PER_TRANS_NO_POLLING_NO_DMA, "%d us", t_flight_sorted[(TEST_TIMES+1)/2]);
 
     //acquire the bus to send polling transactions faster
     ret = spi_device_acquire_bus(spi, portMAX_DELAY);
@@ -1427,16 +1504,13 @@ TEST_CASE("spi_speed","[spi]")
     //record flight time by polling, without DMA
     t_flight_num = 0;
     for (int i = 0; i < TEST_TIMES; i++) {
-        spi_device_polling_transmit(spi, &trans); // prime the flash cache
-        RECORD_TIME_START();
-        spi_device_polling_transmit(spi, &trans);
-        RECORD_TIME_END(&t_flight);
+        spi_transmit_polling_measure(spi, &trans, &t_flight);
         sorted_array_insert(t_flight_sorted, &t_flight_num, t_flight);
     }
-    TEST_PERFORMANCE_LESS_THAN(SPI_PER_TRANS_POLLING_NO_DMA, "%d us", t_flight_sorted[(TEST_TIMES+1)/2]);
     for (int i = 0; i < TEST_TIMES; i++) {
         ESP_LOGI(TAG, "%d", t_flight_sorted[i]);
     }
+    TEST_PERFORMANCE_LESS_THAN(SPI_PER_TRANS_POLLING_NO_DMA, "%d us", t_flight_sorted[(TEST_TIMES+1)/2]);
 
     //release the bus
     spi_device_release_bus(spi);

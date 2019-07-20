@@ -28,6 +28,7 @@ else()
                    "dbg_stubs.c"
                    "dport_access.c"
                    "dport_panic_highint_hdl.S"
+                   "esp_adapter.c"
                    "esp_err_to_name.c"
                    "esp_timer.c"
                    "esp_timer_esp32.c"
@@ -57,12 +58,11 @@ else()
                    "system_api.c"
                    "task_wdt.c"
                    "wifi_init.c"
-                   "wifi_os_adapter.c"
                    "hwcrypto/aes.c"
                    "hwcrypto/sha.c")
     set(COMPONENT_ADD_INCLUDEDIRS "include")
 
-    set(COMPONENT_REQUIRES driver tcpip_adapter)
+    set(COMPONENT_REQUIRES driver tcpip_adapter esp_event)
     # driver is a public requirement because esp_sleep.h uses gpio_num_t & touch_pad_t
     # tcpip_adapter is a public requirement because esp_event.h uses tcpip_adapter types
     set(COMPONENT_PRIV_REQUIRES
@@ -72,6 +72,14 @@ else()
     register_component()
 
     target_link_libraries(esp32 "-L ${CMAKE_CURRENT_SOURCE_DIR}/lib")
+
+    # Add a different linker search path depending on WiFi optimisations
+    if (CONFIG_ESP32_WIFI_IRAM_OPT)
+        target_link_libraries(esp32 "-L ${CMAKE_CURRENT_SOURCE_DIR}/ld/wifi_iram_opt")
+    else()
+        target_link_libraries(esp32 "-L ${CMAKE_CURRENT_SOURCE_DIR}/ld/wifi_iram_noopt")
+    endif()
+
     if(NOT CONFIG_NO_BLOBS)
         target_link_libraries(esp32 coexist core espnow mesh net80211 phy pp rtc smartconfig wpa2 wpa wps)
     endif()
@@ -91,7 +99,10 @@ else()
         )
 
     if(CONFIG_SPIRAM_CACHE_WORKAROUND)
-        add_compile_options(-mfix-esp32-psram-cache-issue)
+        # Note: Adding as a PUBLIC compile option here causes this option to propagate to all components that depend on esp32.
+        #
+        # To handle some corner cases, the same flag is set in project_include.cmake
+        target_compile_options(esp32 PUBLIC -mfix-esp32-psram-cache-issue)
     else()
         target_linker_script(esp32 "ld/esp32.rom.spiram_incompatible_fns.ld")
     endif()
@@ -144,4 +155,14 @@ else()
 
     endif()
 
+    # Enable dynamic esp_timer overflow value if building unit tests 
+    if(NOT "${BUILD_TEST_COMPONENTS}" EQUAL "")
+        add_definitions(-DESP_TIMER_DYNAMIC_OVERFLOW_VAL)
+    endif()
+
+    # disable stack protection in files which are involved in initialization of that feature
+    set_source_files_properties(
+        stack_check.c cpu_start.c
+        PROPERTIES COMPILE_FLAGS
+        -fno-stack-protector)
 endif()

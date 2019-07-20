@@ -59,7 +59,7 @@
 #include "esp_task_wdt.h"
 #include "esp_phy_init.h"
 #include "esp_cache_err_int.h"
-#include "esp_coexist.h"
+#include "esp_coexist_internal.h"
 #include "esp_panic.h"
 #include "esp_core_dump.h"
 #include "esp_app_trace.h"
@@ -124,6 +124,7 @@ void IRAM_ATTR call_start_cpu0()
     RESET_REASON rst_reas[2];
 #endif
     cpu_configure_region_protection();
+    cpu_init_memctl();
 
     //Move exception vectors to IRAM
     asm volatile (\
@@ -249,6 +250,7 @@ void IRAM_ATTR call_start_cpu1()
 
     ets_set_appcpu_boot_addr(0);
     cpu_configure_region_protection();
+    cpu_init_memctl();
 
 #if CONFIG_CONSOLE_UART_NONE
     ets_install_putc1(NULL);
@@ -361,7 +363,6 @@ void start_cpu0_default(void)
 #endif
     esp_cache_err_int_init();
     esp_crosscore_int_init();
-    esp_ipc_init();
 #ifndef CONFIG_FREERTOS_UNICORE
     esp_dport_access_int_init();
 #endif
@@ -371,11 +372,10 @@ void start_cpu0_default(void)
 #ifdef CONFIG_PM_ENABLE
     esp_pm_impl_init();
 #ifdef CONFIG_PM_DFS_INIT_AUTO
-    rtc_cpu_freq_t max_freq;
-    rtc_clk_cpu_freq_from_mhz(CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ, &max_freq);
+    int xtal_freq = (int) rtc_clk_xtal_freq_get();
     esp_pm_config_esp32_t cfg = {
-            .max_cpu_freq = max_freq,
-            .min_cpu_freq = RTC_CPU_FREQ_XTAL
+        .max_freq_mhz = CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ,
+        .min_freq_mhz = xtal_freq,
     };
     esp_pm_configure(&cfg);
 #endif //CONFIG_PM_DFS_INIT_AUTO
@@ -383,6 +383,10 @@ void start_cpu0_default(void)
 
 #if CONFIG_ESP32_ENABLE_COREDUMP
     esp_core_dump_init();
+#endif
+
+#if CONFIG_SW_COEXIST_ENABLE
+    esp_coex_adapter_register(&g_coex_adapter_funcs);
 #endif
 
     portBASE_TYPE res = xTaskCreatePinnedToCore(&main_task, "main",

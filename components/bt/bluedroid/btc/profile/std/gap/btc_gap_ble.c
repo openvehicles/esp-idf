@@ -426,6 +426,35 @@ static void btc_stop_adv_callback(uint8_t status)
     }
 }
 
+void btc_update_duplicate_exceptional_list_callback(tBTA_STATUS status, uint8_t subcode, uint32_t length, uint8_t *device_info)
+{
+    esp_ble_gap_cb_param_t param;
+    bt_status_t ret;
+    btc_msg_t msg;
+
+    msg.sig = BTC_SIG_API_CB;
+    msg.pid = BTC_PID_GAP_BLE;
+    msg.act = ESP_GAP_BLE_UPDATE_DUPLICATE_EXCEPTIONAL_LIST_COMPLETE_EVT;
+    param.update_duplicate_exceptional_list_cmpl.status = status;
+    param.update_duplicate_exceptional_list_cmpl.subcode = subcode;
+    if(length > sizeof(param.update_duplicate_exceptional_list_cmpl.device_info)) {
+        length = sizeof(param.update_duplicate_exceptional_list_cmpl.device_info);
+    }
+    param.update_duplicate_exceptional_list_cmpl.length = length;
+    memcpy(param.update_duplicate_exceptional_list_cmpl.device_info, device_info, length);
+    ret = btc_transfer_context(&msg, &param, sizeof(esp_ble_gap_cb_param_t), NULL);
+
+    if (ret != BT_STATUS_SUCCESS) {
+        BTC_TRACE_ERROR("%s btc_transfer_context failed\n", __func__);
+    }
+}
+
+static void btc_ble_update_duplicate_exceptional_list(uint8_t subcode, uint32_t info_type, BD_ADDR device_info,
+                                 tBTA_UPDATE_DUPLICATE_EXCEPTIONAL_LIST_CMPL_CBACK p_update_duplicate_ignore_list_cback)
+{
+    BTA_DmUpdateDuplicateExceptionalList(subcode, info_type, device_info, p_update_duplicate_ignore_list_cback);
+}
+
 static void btc_ble_start_advertising (esp_ble_adv_params_t *ble_adv_params, tBTA_START_ADV_CMPL_CBACK start_adv_cback)
 {
     tBLE_BD_ADDR peer_addr;
@@ -451,6 +480,10 @@ static void btc_ble_start_advertising (esp_ble_adv_params_t *ble_adv_params, tBT
     if((ble_adv_params->channel_map | ADV_CHNL_ALL) != ADV_CHNL_ALL || ble_adv_params->channel_map == 0) {
         status = ESP_BT_STATUS_PARM_INVALID;
         BTC_TRACE_ERROR("Invalid advertisting channel map parameters.\n");
+    }
+    if (!BLE_ISVALID_PARAM(ble_adv_params->peer_addr_type, BLE_ADDR_TYPE_PUBLIC, BLE_ADDR_TYPE_RANDOM)) {
+        status = ESP_BT_STATUS_PARM_INVALID;
+        BTC_TRACE_ERROR("Invalid advertisting peer address type parameters.\n");
     }
     if(status != ESP_BT_STATUS_SUCCESS) {
         if(start_adv_cback) {
@@ -570,6 +603,9 @@ static void btc_search_callback(tBTA_DM_SEARCH_EVT event, tBTA_DM_SEARCH *p_data
         break;
     case BTA_DM_SEARCH_CANCEL_CMPL_EVT:
         BTC_TRACE_DEBUG("BTA_DM_SEARCH_CANCEL_CMPL_EVT\n");
+        break;
+    case BTA_DM_INQ_DISCARD_NUM_EVT:
+        param.scan_rst.num_dis = p_data->inq_dis.num_dis;
         break;
     default:
         BTC_TRACE_ERROR("%s : Unknown event 0x%x\n", __FUNCTION__, event);
@@ -831,7 +867,7 @@ static void btc_ble_set_rand_addr (BD_ADDR rand_addr, tBTA_SET_RAND_ADDR_CBACK *
             BTA_DmSetRandAddress(rand_addr, btc_set_rand_addr_callback);
         } else {
             btc_set_rand_addr_callback(BTM_INVALID_STATIC_RAND_ADDR);
-            BTC_TRACE_ERROR("Invalid random address, the high bit should be 0b11, all bits of the random part shall not be to 1 or 0");
+            BTC_TRACE_ERROR("Invalid random address, the high bit should be 0b11, bits of the random part shall not be all 1 or 0");
         }
     } else {
         btc_set_rand_addr_callback(BTM_INVALID_STATIC_RAND_ADDR);
@@ -1081,6 +1117,12 @@ void btc_gap_ble_call_handler(btc_msg_t *msg)
         btc_ble_set_scan_rsp_data_raw(arg->cfg_scan_rsp_data_raw.raw_scan_rsp,
                                       arg->cfg_scan_rsp_data_raw.raw_scan_rsp_len,
                                       btc_scan_rsp_data_raw_callback);
+        break;
+    case BTC_GAP_BLE_UPDATE_DUPLICATE_SCAN_EXCEPTIONAL_LIST:
+        btc_ble_update_duplicate_exceptional_list(arg->update_duplicate_exceptional_list.subcode,
+                                                arg->update_duplicate_exceptional_list.info_type,
+                                                arg->update_duplicate_exceptional_list.device_info,
+                                                btc_update_duplicate_exceptional_list_callback);
         break;
 #if (SMP_INCLUDED == TRUE)
     case BTC_GAP_BLE_SET_ENCRYPTION_EVT: {

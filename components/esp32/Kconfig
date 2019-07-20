@@ -124,7 +124,8 @@ config SPIRAM_CACHE_WORKAROUND
     help
         Revision 1 of the ESP32 has a bug that can cause a write to PSRAM not to take place in some situations
         when the cache line needs to be fetched from external RAM and an interrupt occurs. This enables a
-        fix in the compiler that makes sure the specific code that is vulnerable to this will not be emitted.
+        fix in the compiler (-mfix-esp32-psram-cache-issue) that makes sure the specific code that is vulnerable
+        to this will not be emitted.
 
         This will also not use any bits of newlib that are located in ROM, opting for a version that is compiled
         with the workaround and located in flash instead.
@@ -213,6 +214,96 @@ config SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY
         in PSRAM instead of internal memory, and placed most of variables of lwip,net802.11,pp,bluedroid library
         to external memory defaultly. 
 
+choice SPIRAM_OCCUPY_SPI_HOST
+    prompt "SPI host to use for 32MBit PSRAM"
+    default SPIRAM_OCCUPY_VSPI_HOST
+    depends on SPIRAM_SPEED_80M
+    help
+        When both flash and PSRAM is working under 80MHz, and the PSRAM is of type 32MBit, one of the HSPI/VSPI
+        host will be used to output the clock. Select which one to use here.
+
+config SPIRAM_OCCUPY_HSPI_HOST
+    bool "HSPI host (SPI2)"
+config SPIRAM_OCCUPY_VSPI_HOST
+    bool "VSPI host (SPI3)"
+endchoice
+
+menu "PSRAM clock and cs IO for ESP32-DOWD"
+
+    config D0WD_PSRAM_CLK_IO
+        int "PSRAM CLK IO number"
+        depends on SPIRAM_SUPPORT
+        range 0 33
+        default 17
+        help
+            The PSRAM CLOCK IO can be any unused GPIO, user can config it based on hardware design. If user use
+            1.8V flash and 1.8V psram, this value can only be one of 6, 7, 8, 9, 10, 11, 16, 17.
+
+    config D0WD_PSRAM_CS_IO
+        int "PSRAM CS IO number"
+        depends on SPIRAM_SUPPORT
+        range 0 33
+        default 16
+        help
+            The PSRAM CS IO can be any unused GPIO, user can config it based on hardware design. If user use
+            1.8V flash and 1.8V psram, this value can only be one of 6, 7, 8, 9, 10, 11, 16, 17.
+endmenu
+
+menu "PSRAM clock and cs IO for ESP32-D2WD"
+
+    config D2WD_PSRAM_CLK_IO
+        int "PSRAM CLK IO number"
+        depends on SPIRAM_SUPPORT
+        range 0 33
+        default 9
+        help
+            User can config it based on hardware design. For ESP32-D2WD chip, the psram can only be 1.8V psram,
+            so this value can only be one of 6, 7, 8, 9, 10, 11, 16, 17.
+
+    config D2WD_PSRAM_CS_IO
+        int "PSRAM CS IO number"
+        depends on SPIRAM_SUPPORT
+        range 0 33
+        default 10
+        help
+            User can config it based on hardware design. For ESP32-D2WD chip, the psram can only be 1.8V psram,
+            so this value can only be one of 6, 7, 8, 9, 10, 11, 16, 17.
+endmenu
+
+menu "PSRAM clock and cs IO for ESP32-PICO"
+
+    config PICO_PSRAM_CS_IO
+        int "PSRAM CS IO number"
+        depends on SPIRAM_SUPPORT
+        range 0 33
+        default 10
+        help
+            The PSRAM CS IO can be any unused GPIO, user can config it based on hardware design.
+
+            For ESP32-PICO chip, the psram share clock with flash, so user do not need to configure the clock
+            IO.
+            For the reference hardware design, please refer to
+            https://www.espressif.com/sites/default/files/documentation/esp32-pico-d4_datasheet_en.pdf
+
+endmenu
+
+config SPIRAM_SPIWP_SD3_PIN
+    int "SPI PSRAM WP(SD3) Pin when customising pins via eFuse (read help)"
+    depends on FLASHMODE_DIO || FLASHMODE_DOUT
+    range 0 33
+    default 7
+    help
+        This value is ignored unless flash mode is set to DIO or DOUT and the SPI flash pins have been
+        overriden by setting the eFuses SPI_PAD_CONFIG_xxx.
+
+        When this is the case, the eFuse config only defines 3 of the 4 Quad I/O data pins. The WP pin (aka
+        ESP32 pin "SD_DATA_3" or SPI flash pin "IO2") is not specified in eFuse. And the psram only has QPI
+        mode, the WP pin is necessary, so we need to configure this value here.
+
+        When flash mode is set to QIO or QOUT, the PSRAM WP pin will be set as the value configured in
+        bootloader.
+
+        For ESP32-PICO chip, the default value of this config should be 7.
 endmenu
 
 config MEMMAP_TRACEMEM
@@ -772,6 +863,19 @@ config ESP32_RTC_CLOCK_SOURCE_INTERNAL_8MD256
     bool "Internal 8.5MHz oscillator, divided by 256 (~33kHz)"
 endchoice
 
+config ESP32_RTC_EXTERNAL_CRYSTAL_ADDITIONAL_CURRENT
+    bool "Additional current for external 32kHz crystal"
+    depends on ESP32_RTC_CLOCK_SOURCE_EXTERNAL_CRYSTAL
+    default "n"
+    help
+        Choose which additional current is used for rtc external crystal.
+
+        - With some 32kHz crystal configurations, the X32N and X32P pins may not
+          have enough drive strength to keep the crystal oscillating during deep sleep.
+          If this option is enabled, additional current from touchpad 9 is provided
+          internally to drive the 32kHz crystal. If this option is enabled, deep sleep current
+          is slightly higher (4-5uA) and the touchpad and ULP wakeup sources are not available.
+
 config ESP32_RTC_CLK_CAL_CYCLES
     int "Number of cycles for RTC_SLOW_CLK calibration"
     default 3000 if ESP32_RTC_CLOCK_SOURCE_EXTERNAL_CRYSTAL
@@ -938,6 +1042,8 @@ config SW_COEXIST_ENABLE
         If enabled, WiFi & Bluetooth coexistence is controlled by software rather than hardware.
         Recommended for heavy traffic scenarios. Both coexistence configuration options are
         automatically managed, no user intervention is required.
+        If only Bluetooth is used, it is recommended to disable this option to reduce binary file
+        size.
 
 choice SW_COEXIST_PREFERENCE
     prompt "WiFi/Bluetooth coexistence performance preference"
@@ -970,19 +1076,24 @@ config SW_COEXIST_PREFERENCE_VALUE
 
 config ESP32_WIFI_STATIC_RX_BUFFER_NUM
     int "Max number of WiFi static RX buffers"
-    range 2 25
-    default 10
+    range 2 25 if !WIFI_LWIP_ALLOCATION_FROM_SPIRAM_FIRST
+    range 8 25 if WIFI_LWIP_ALLOCATION_FROM_SPIRAM_FIRST
+    default 10 if !WIFI_LWIP_ALLOCATION_FROM_SPIRAM_FIRST
+    default 16 if WIFI_LWIP_ALLOCATION_FROM_SPIRAM_FIRST
     help
         Set the number of WiFi static RX buffers. Each buffer takes approximately 1.6KB of RAM.
         The static rx buffers are allocated when esp_wifi_init is called, they are not freed
         until esp_wifi_deinit is called.
 
         WiFi hardware use these buffers to receive all 802.11 frames.
-        A higher number may allow higher throughput but increases memory use.
+        A higher number may allow higher throughput but increases memory use. If ESP32_WIFI_AMPDU_RX_ENABLED 
+        is enabled, this value is recommended to set equal or bigger than ESP32_WIFI_RX_BA_WIN in order to 
+        achieve better throughput and compatibility with both stations and APs.
 
 config ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM
     int "Max number of WiFi dynamic RX buffers"
-    range 0 128
+    range 0 128 if !LWIP_WND_SCALE
+    range 0 1024 if LWIP_WND_SCALE
     default 32
     help
         Set the number of WiFi dynamic RX buffers, 0 means unlimited RX buffers will be allocated
@@ -1091,13 +1202,16 @@ config ESP32_WIFI_AMPDU_RX_ENABLED
 config ESP32_WIFI_RX_BA_WIN
     int "WiFi AMPDU RX BA window size"
     depends on ESP32_WIFI_AMPDU_RX_ENABLED
-    range 2 32
-    default 6
+    range 2 32 if !WIFI_LWIP_ALLOCATION_FROM_SPIRAM_FIRST
+    range 16 32 if WIFI_LWIP_ALLOCATION_FROM_SPIRAM_FIRST
+    default 6 if !WIFI_LWIP_ALLOCATION_FROM_SPIRAM_FIRST
+    default 16 if WIFI_LWIP_ALLOCATION_FROM_SPIRAM_FIRST
     help
-        Set the size of WiFi Block Ack RX window. Generally a bigger value means higher throughput but
-        more memory. Most of time we should NOT change the default value unless special reason, e.g.
+        Set the size of WiFi Block Ack RX window. Generally a bigger value means higher throughput and better 
+        compatibility but more memory. Most of time we should NOT change the default value unless special reason, e.g.
         test the maximum UDP RX throughput with iperf etc. For iperf test in shieldbox, the recommended
-        value is 9~12.
+        value is 9~12. If PSRAM is used and WiFi memory is prefered to allocat in PSRAM first, the default 
+        and minimum value should be 16 to achieve better throughput and compatibility with both stations and APs.
 
 config ESP32_WIFI_NVS_ENABLED
     bool "WiFi NVS flash"
@@ -1136,7 +1250,21 @@ config ESP32_WIFI_SOFTAP_BEACON_MAX_LEN
         932 (752+36*5).
         
         Setting a longer beacon length also assists with debugging as the conflicting root nodes can be identified more quickly.
-        
+
+config ESP32_WIFI_IRAM_OPT
+    bool "WiFi IRAM speed optimization"
+    default y
+    help
+        Select this option to place frequently called Wi-Fi library functions in IRAM. When this option is disabled,
+        more than 10Kbytes of IRAM memory will be saved but Wi-Fi throughput will be reduced.
+
+config ESP32_WIFI_MGMT_SBUF_NUM
+    int "WiFi mgmt short buffer number"
+    range 6 32
+    default 32
+    help
+        Set the number of WiFi management short buffer.
+
 endmenu  # Wi-Fi
 
 menu PHY

@@ -356,27 +356,6 @@ void SMP_SetStaticPasskey (BOOLEAN add, UINT32 passkey)
 
 /*******************************************************************************
 **
-** Function         SMP_SetAcceptAuthMode
-**
-** Description      This function is called to set only accept specified Authentication
-**
-**
-** Parameters:      enable         - Whether to enable this function
-**
-**                  auth_mode      - Authentication mode
-**
-**
-*******************************************************************************/
-void SMP_SetAcceptAuthMode (UINT8 enable, UINT8 auth_mode)
-{
-    tSMP_CB *p_cb = & smp_cb;
-
-    p_cb->accept_specified_sec_auth = enable;
-    p_cb->origin_loc_auth_req = auth_mode;
-    
-}
-/*******************************************************************************
-**
 ** Function         SMP_ConfirmReply
 **
 ** Description      This function is called after Security Manager submitted
@@ -607,14 +586,18 @@ void SMP_KeypressNotification (BD_ADDR bd_addr, UINT8 value)
 BOOLEAN SMP_CreateLocalSecureConnectionsOobData (tBLE_BD_ADDR *addr_to_send_to)
 {
     tSMP_CB *p_cb = &smp_cb;
+#if (!CONFIG_BT_STACK_NO_LOG)
     UINT8   *bd_addr;
+#endif
 
     if (addr_to_send_to == NULL) {
         SMP_TRACE_ERROR ("%s addr_to_send_to is not provided", __FUNCTION__);
         return FALSE;
     }
 
+#if (!CONFIG_BT_STACK_NO_LOG)
     bd_addr = addr_to_send_to->bda;
+#endif
 
     SMP_TRACE_EVENT ("%s addr type: %u,  BDA: %08x%04x,  state: %u, br_state: %u",
                      __FUNCTION__, addr_to_send_to->type,

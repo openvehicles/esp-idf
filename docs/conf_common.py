@@ -27,6 +27,8 @@ import shlex
 
 from local_util import run_cmd_get_output, copy_if_modified
 
+# build_docs on the CI server sometimes fails under Python3. This is a workaround:
+sys.setrecursionlimit(3500)
 
 try:
     builddir = os.environ['BUILDDIR']
@@ -72,7 +74,6 @@ confgen_args = [sys.executable,
                 "../../tools/kconfig_new/confgen.py",
                 "--kconfig", "../../Kconfig",
                 "--config", temp_sdkconfig_path,
-                "--create-config-if-missing",
                 "--env", "COMPONENT_KCONFIGS={}".format(kconfigs),
                 "--env", "COMPONENT_KCONFIGS_PROJBUILD={}".format(kconfig_projbuilds),
                 "--env", "IDF_PATH={}".format(idf_path),

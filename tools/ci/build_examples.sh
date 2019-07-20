@@ -61,6 +61,7 @@ FAILED_EXAMPLES=""
 RESULT_ISSUES=22  # magic number result code for issues found
 LOG_SUSPECTED=${LOG_PATH}/common_log.txt
 touch ${LOG_SUSPECTED}
+SDKCONFIG_DEFAULTS_CI=sdkconfig.ci
 
 if [ $# -eq 0 ]
 then
@@ -75,7 +76,8 @@ else
     [ -z ${JOB_PATTERN} ] && die "JOB_PATTERN is bad"
 
     # parse number 'NUM' at the end of string 'some_your_text_NUM'
-    JOB_NUM=$( echo ${JOB_NAME} | sed -n -r 's/^.*_([0-9]+)$/\1/p' )
+    # NOTE: Getting rid of the leading zero to get the decimal
+    JOB_NUM=$( echo ${JOB_NAME} | sed -n -r 's/^.*_0*([0-9]+)$/\1/p' )
     [ -z ${JOB_NUM} ] && die "JOB_NUM is bad"
 
     # count number of the jobs
@@ -116,17 +118,32 @@ build_example () {
         export EXTRA_CFLAGS="-Werror -Werror=deprecated-declarations"
         export EXTRA_CXXFLAGS=${EXTRA_CFLAGS}
 
+        # sdkconfig files are normally not checked into git, but may be present when
+        # a developer runs this script locally
+        rm -f sdkconfig
+
+        # If sdkconfig.ci file is present, append it to sdkconfig.defaults,
+        # replacing environment variables
+        if [[ -f "$SDKCONFIG_DEFAULTS_CI" ]]; then
+            cat $SDKCONFIG_DEFAULTS_CI | $IDF_PATH/tools/ci/envsubst.py >> sdkconfig.defaults
+        fi
+
         # build non-verbose first
         local BUILDLOG=${LOG_PATH}/ex_${ID}_log.txt
         touch ${BUILDLOG}
 
+        local FLASH_ARGS=build/download.config
+
         make clean >>${BUILDLOG} 2>&1 &&
         make defconfig >>${BUILDLOG} 2>&1 &&
         make all >>${BUILDLOG} 2>&1 &&
-        ( make print_flash_cmd | tail -n 1 >build/download.config ) >>${BUILDLOG} 2>&1 ||
+        make print_flash_cmd >${FLASH_ARGS}.full 2>>${BUILDLOG} ||
         {
             RESULT=$?; FAILED_EXAMPLES+=" ${EXAMPLE_NAME}" ;
         }
+
+        tail -n 1 ${FLASH_ARGS}.full > ${FLASH_ARGS} || :
+        test -s ${FLASH_ARGS} || die "Error: ${FLASH_ARGS} file is empty"
 
         cat ${BUILDLOG}
     popd
@@ -136,8 +153,8 @@ build_example () {
 
 EXAMPLE_NUM=0
 
-find ${IDF_PATH}/examples/ -type f -name Makefile | sort | \
-while read FN
+EXAMPLE_PATHS=$( find ${IDF_PATH}/examples/ -type f -name Makefile | grep -v "/build_system/cmake/" | sort )
+for FN in ${EXAMPLE_PATHS}
 do
     if [[ $EXAMPLE_NUM -lt $START_NUM || $EXAMPLE_NUM -ge $END_NUM ]]
     then
