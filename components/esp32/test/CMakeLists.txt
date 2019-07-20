@@ -1,7 +1,7 @@
 set(COMPONENT_SRCDIRS ".")
 set(COMPONENT_ADD_INCLUDEDIRS ". ${CMAKE_CURRENT_BINARY_DIR}")
 
-set(COMPONENT_REQUIRES unity nvs_flash ulp)
+set(COMPONENT_REQUIRES unity test_utils nvs_flash ulp)
 
 register_component()
 
@@ -34,4 +34,4 @@ add_definitions(-DCOEX_ADAPTER_MD5=\"${COEX_ADAPTER_MD5}\")
 
 add_custom_target(esp32_test_logo DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/test_tjpgd_logo.h")
 
-add_dependencies(${COMPONENT_NAME} esp32_test_logo)
+add_dependencies(${COMPONENT_TARGET} esp32_test_logo)

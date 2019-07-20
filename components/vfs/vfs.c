@@ -838,6 +838,16 @@ int esp_vfs_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *errorfds
                         esp_vfs_safe_fd_isset(fd, errorfds)) {
                     const vfs_entry_t *vfs = s_vfs[vfs_index];
                     socket_select = vfs->vfs.socket_select;
+
+                    // get_socket_select_semaphore needs to be set for a socket driver where semaphore can be
+                    // initialized outside interrupt handlers (ignoring this could result in unexpected failures)
+                    if (vfs->vfs.get_socket_select_semaphore != NULL) {
+                        vfs->vfs.get_socket_select_semaphore(); // Semaphore is returned and it was allocated if it
+                        // wasn't before. We don't use the return value just need to be sure that it doesn't get
+                        // allocated later from ISR.
+                        // Note: ESP-IDF v4.0 will start to use this callback differently with some breaking changes
+                        // in the VFS API.
+                    }
                 }
             }
             continue;
@@ -1096,6 +1106,20 @@ int tcsendbreak(int fd, int duration)
     return ret;
 }
 #endif // CONFIG_SUPPORT_TERMIOS
+
+int esp_vfs_utime(const char *path, const struct utimbuf *times)
+{
+    int ret;
+    const vfs_entry_t* vfs = get_vfs_for_path(path);
+    struct _reent* r = __getreent();
+    if (vfs == NULL) {
+        __errno_r(r) = ENOENT;
+        return -1;
+    }
+    const char* path_within_vfs = translate_path(vfs, path);
+    CHECK_AND_CALL(ret, r, vfs, utime, path_within_vfs, times);
+    return ret;
+}
 
 int esp_vfs_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 {

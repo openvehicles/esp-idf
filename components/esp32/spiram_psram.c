@@ -618,7 +618,7 @@ psram_size_t psram_get_size()
  */
 esp_err_t IRAM_ATTR psram_enable(psram_cache_mode_t mode, psram_vaddr_mode_t vaddrmode)   //psram init
 {
-    psram_io_t psram_io={0};
+    psram_io_t psram_io = {0};
     uint32_t chip_ver = REG_GET_FIELD(EFUSE_BLK0_RDATA3_REG, EFUSE_RD_CHIP_VER_PKG);
     uint32_t pkg_ver = chip_ver & 0x7;
     if (pkg_ver == EFUSE_RD_CHIP_VER_PKG_ESP32D2WDQ5) {
@@ -725,12 +725,12 @@ esp_err_t IRAM_ATTR psram_enable(psram_cache_mode_t mode, psram_vaddr_mode_t vad
     if (PSRAM_IS_32MBIT_VER0(s_psram_id)) {
         s_clk_mode = PSRAM_CLK_MODE_DCLK;
         if (mode == PSRAM_CACHE_F80M_S80M) {
-            /*   note: If the third mode(80Mhz+80Mhz) is enabled for 32MBit 1V8 psram, VSPI port will be 
-                 occupied by the system.
-                 Application code should never touch VSPI hardware in this case.  We try to stop applications
+            /*   note: If the third mode(80Mhz+80Mhz) is enabled for 32MBit 1V8 psram, one of HSPI/VSPI port will be
+                 occupied by the system (according to kconfig).
+                 Application code should never touch HSPI/VSPI hardware in this case.  We try to stop applications
                  from doing this using the drivers by claiming the port for ourselves */
-            periph_module_enable(PERIPH_VSPI_MODULE);
-            bool r=spicommon_periph_claim(VSPI_HOST);
+            periph_module_enable(PSRAM_SPI_MODULE);
+            bool r=spicommon_periph_claim(PSRAM_SPI_HOST, "psram");
             if (!r) {
                 return ESP_ERR_INVALID_STATE;
             }

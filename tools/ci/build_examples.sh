@@ -63,6 +63,8 @@ LOG_SUSPECTED=${LOG_PATH}/common_log.txt
 touch ${LOG_SUSPECTED}
 SDKCONFIG_DEFAULTS_CI=sdkconfig.ci
 
+EXAMPLE_PATHS=$( find ${IDF_PATH}/examples/ -type f -name Makefile | grep -v "/build_system/cmake/" | sort )
+
 if [ $# -eq 0 ]
 then
     START_NUM=0
@@ -85,7 +87,7 @@ else
     [ -z ${NUM_OF_JOBS} ] && die "NUM_OF_JOBS is bad"
 
     # count number of examples
-    NUM_OF_EXAMPLES=$( find ${IDF_PATH}/examples/ -type f -name Makefile | wc -l )
+    NUM_OF_EXAMPLES=$( echo "${EXAMPLE_PATHS}" | wc -l )
     [ -z ${NUM_OF_EXAMPLES} ] && die "NUM_OF_EXAMPLES is bad"
 
     # separate intervals
@@ -109,13 +111,26 @@ build_example () {
 
     local EXAMPLE_DIR=$(dirname "${MAKE_FILE}")
     local EXAMPLE_NAME=$(basename "${EXAMPLE_DIR}")
+    
+    # Check if the example needs a different base directory.
+    # Path of the Makefile relative to $IDF_PATH
+    local MAKE_FILE_REL=${MAKE_FILE#"${IDF_PATH}/"}
+    # Look for it in build_example_dirs.txt:
+    local COPY_ROOT_REL=$(sed -n -E "s|${MAKE_FILE_REL}[[:space:]]+(.*)|\1|p" < ${IDF_PATH}/tools/ci/build_example_dirs.txt)
+    if [[ -n "${COPY_ROOT_REL}" && -d "${IDF_PATH}/${COPY_ROOT_REL}/" ]]; then
+        local COPY_ROOT=${IDF_PATH}/${COPY_ROOT_REL}
+    else
+        local COPY_ROOT=${EXAMPLE_DIR}
+    fi
 
     echo "Building ${EXAMPLE_NAME} as ${ID}..."
     mkdir -p "example_builds/${ID}"
-    cp -r "${EXAMPLE_DIR}" "example_builds/${ID}"
-    pushd "example_builds/${ID}/${EXAMPLE_NAME}"
+    cp -r "${COPY_ROOT}" "example_builds/${ID}"
+    local COPY_ROOT_PARENT=$(dirname ${COPY_ROOT})
+    local EXAMPLE_DIR_REL=${EXAMPLE_DIR#"${COPY_ROOT_PARENT}"}
+    pushd "example_builds/${ID}/${EXAMPLE_DIR_REL}"
         # be stricter in the CI build than the default IDF settings
-        export EXTRA_CFLAGS="-Werror -Werror=deprecated-declarations"
+        export EXTRA_CFLAGS=${PEDANTIC_CFLAGS}
         export EXTRA_CXXFLAGS=${EXTRA_CFLAGS}
 
         # sdkconfig files are normally not checked into git, but may be present when
@@ -148,22 +163,21 @@ build_example () {
         cat ${BUILDLOG}
     popd
 
-    grep -i "error\|warning" "${BUILDLOG}" 2>&1 >> "${LOG_SUSPECTED}" || :
+    grep -i "error\|warning\|command not found" "${BUILDLOG}" 2>&1 >> "${LOG_SUSPECTED}" || :
 }
 
 EXAMPLE_NUM=0
 
-EXAMPLE_PATHS=$( find ${IDF_PATH}/examples/ -type f -name Makefile | grep -v "/build_system/cmake/" | sort )
-for FN in ${EXAMPLE_PATHS}
+for EXAMPLE_PATH in ${EXAMPLE_PATHS}
 do
     if [[ $EXAMPLE_NUM -lt $START_NUM || $EXAMPLE_NUM -ge $END_NUM ]]
     then
         EXAMPLE_NUM=$(( $EXAMPLE_NUM + 1 ))
         continue
     fi
-    echo ">>> example [ ${EXAMPLE_NUM} ] - $FN"
+    echo ">>> example [ ${EXAMPLE_NUM} ] - $EXAMPLE_PATH"
 
-    build_example "${EXAMPLE_NUM}" "${FN}"
+    build_example "${EXAMPLE_NUM}" "${EXAMPLE_PATH}"
 
     EXAMPLE_NUM=$(( $EXAMPLE_NUM + 1 ))
 done

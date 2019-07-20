@@ -1,4 +1,4 @@
-# expand_requires.cmake is a utility cmake script to expand component requirements early in the build,
+# expand_requirements.cmake is a utility cmake script to expand component requirements early in the build,
 # before the components are ready to be included.
 #
 # Parameters:
@@ -31,6 +31,9 @@
 # TODO: Error out if a component requirement is missing
 cmake_minimum_required(VERSION 3.5)
 include("${IDF_PATH}/tools/cmake/utilities.cmake")
+include("${IDF_PATH}/tools/cmake/component_utils.cmake")
+
+set(ESP_PLATFORM 1)
 
 if(NOT DEPENDENCIES_FILE)
     message(FATAL_ERROR "DEPENDENCIES_FILE must be set.")
@@ -42,12 +45,6 @@ endif()
 spaces2list(COMPONENT_DIRS)
 
 spaces2list(COMPONENT_REQUIRES_COMMON)
-
-function(debug message)
-    if(DEBUG)
-        message(STATUS "${message}")
-    endif()
-endfunction()
 
 # Dummy register_component used to save requirements variables as global properties, for later expansion
 #
@@ -78,77 +75,11 @@ macro(register_config_only_component)
     register_component()
 endmacro()
 
-# Given a component name (find_name) and a list of component paths (component_paths),
-# return the path to the component in 'variable'
-#
-# Fatal error is printed if the component is not found.
-function(find_component_path find_name components component_paths variable)
-    list(FIND components ${find_name} idx)
-    if(NOT idx EQUAL -1)
-        list(GET component_paths ${idx} path)
-        set("${variable}" "${path}" PARENT_SCOPE)
-        return()
-    else()
+function(require_idf_targets)
+    if(NOT ${IDF_TARGET} IN_LIST ARGN)
+        message(FATAL_ERROR "Component ${COMPONENT_NAME} only supports targets: ${ARGN}")
     endif()
-    # TODO: find a way to print the dependency chain that lead to this not-found component
-    message(FATAL_ERROR "Required component ${find_name} is not found in any of the provided COMPONENT_DIRS")
 endfunction()
-
-# components_find_all: Search 'component_dirs' for components and return them
-# as a list of names in 'component_names' and a list of full paths in
-# 'component_paths'
-#
-# component_paths contains only unique component names. Directories
-# earlier in the component_dirs list take precedence.
-function(components_find_all component_dirs component_paths component_names test_component_names)
-    # component_dirs entries can be files or lists of files
-    set(paths "")
-    set(names "")
-    set(test_names "")
-
-    # start by expanding the component_dirs list with all subdirectories
-    foreach(dir ${component_dirs})
-        # Iterate any subdirectories for values
-        file(GLOB subdirs LIST_DIRECTORIES true "${dir}/*")
-        foreach(subdir ${subdirs})
-            set(component_dirs "${component_dirs};${subdir}")
-        endforeach()
-    endforeach()
-
-    # Look for a component in each component_dirs entry
-    foreach(dir ${component_dirs})
-        debug("Looking for CMakeLists.txt in ${dir}")
-        file(GLOB component "${dir}/CMakeLists.txt")
-        if(component)
-            debug("CMakeLists.txt file ${component}")
-            get_filename_component(component "${component}" DIRECTORY)
-            get_filename_component(name "${component}" NAME)
-            if(NOT name IN_LIST names)
-                list(APPEND names "${name}")
-                list(APPEND paths "${component}")
-
-                # Look for test component directory
-                file(GLOB test "${component}/test/CMakeLists.txt")
-                if(test)
-                    list(APPEND test_names "${name}")
-                endif()
-            endif()
-        else()  # no CMakeLists.txt file
-            # test for legacy component.mk and warn
-            file(GLOB legacy_component "${dir}/component.mk")
-            if(legacy_component)
-                get_filename_component(legacy_component "${legacy_component}" DIRECTORY)
-                message(WARNING "Component ${legacy_component} contains old-style component.mk but no CMakeLists.txt. "
-                    "Component will be skipped.")
-            endif()
-        endif()
-    endforeach()
-
-    set(${component_paths} ${paths} PARENT_SCOPE)
-    set(${component_names} ${names} PARENT_SCOPE)
-    set(${test_component_names} ${test_names} PARENT_SCOPE)
-endfunction()
-
 
 # expand_component_requirements: Recursively expand a component's requirements,
 # setting global properties BUILD_COMPONENTS & BUILD_COMPONENT_PATHS and
@@ -221,15 +152,15 @@ macro(filter_components_list)
             endif()
         else()
             set(add_component 1)
-
         endif()
 
         if(NOT ${component} IN_LIST EXCLUDE_COMPONENTS AND add_component EQUAL 1)
             list(APPEND components ${component})
             list(APPEND component_paths ${component_path})
 
-            if(TESTS_ALL EQUAL 1 OR TEST_COMPONENTS)
-                if(NOT TESTS_ALL EQUAL 1 AND TEST_COMPONENTS)
+            if(BUILD_TESTS EQUAL 1)
+
+                if(TEST_COMPONENTS)
                     if(${component} IN_LIST TEST_COMPONENTS)
                         set(add_test_component 1)
                     else()

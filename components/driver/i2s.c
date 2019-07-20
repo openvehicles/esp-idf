@@ -42,17 +42,19 @@ static const char* I2S_TAG = "I2S";
         ESP_LOGE(I2S_TAG,"%s:%d (%s):%s", __FILE__, __LINE__, __FUNCTION__, str);       \
         return (ret);                                                                   \
         }
-#define I2S_MAX_BUFFER_SIZE (4 * 1024 * 1024) //the maximum RAM can be allocated
-#define I2S_BASE_CLK (2*APB_CLK_FREQ)
-#define I2S_ENTER_CRITICAL_ISR()     portENTER_CRITICAL_ISR(&i2s_spinlock[i2s_num])
-#define I2S_EXIT_CRITICAL_ISR()      portEXIT_CRITICAL_ISR(&i2s_spinlock[i2s_num])
-#define I2S_ENTER_CRITICAL()         portENTER_CRITICAL(&i2s_spinlock[i2s_num])
-#define I2S_EXIT_CRITICAL()          portEXIT_CRITICAL(&i2s_spinlock[i2s_num])
+#define I2S_MAX_BUFFER_SIZE               (4 * 1024 * 1024) //the maximum RAM can be allocated
+#define I2S_BASE_CLK                      (2*APB_CLK_FREQ)
+#define I2S_ENTER_CRITICAL_ISR()          portENTER_CRITICAL_ISR(&i2s_spinlock[i2s_num])
+#define I2S_EXIT_CRITICAL_ISR()           portEXIT_CRITICAL_ISR(&i2s_spinlock[i2s_num])
+#define I2S_ENTER_CRITICAL()              portENTER_CRITICAL(&i2s_spinlock[i2s_num])
+#define I2S_EXIT_CRITICAL()               portEXIT_CRITICAL(&i2s_spinlock[i2s_num])
 #define I2S_FULL_DUPLEX_SLAVE_MODE_MASK   (I2S_MODE_TX | I2S_MODE_RX | I2S_MODE_SLAVE)
 #define I2S_FULL_DUPLEX_MASTER_MODE_MASK  (I2S_MODE_TX | I2S_MODE_RX | I2S_MODE_MASTER)
-#define APLL_MIN_FREQ (250000000)
-#define APLL_MAX_FREQ (500000000)
-#define APLL_I2S_MIN_RATE (10675) //in Hz, I2S Clock rate limited by hardware
+#define APLL_MIN_FREQ                     (250000000)
+#define APLL_MAX_FREQ                     (500000000)
+#define APLL_I2S_MIN_RATE                 (10675) //in Hz, I2S Clock rate limited by hardware
+#define I2S_AD_BCK_FACTOR                 (2)
+#define I2S_PDM_BCK_FACTOR                (64)
 /**
  * @brief DMA buffer object
  *
@@ -88,6 +90,7 @@ typedef struct {
     bool use_apll;               /*!< I2S use APLL clock */
     bool tx_desc_auto_clear;    /*!< I2S auto clear tx descriptor on underflow */
     int fixed_mclk;             /*!< I2S fixed MLCK clock */
+    double real_rate;
 } i2s_obj_t;
 
 static i2s_obj_t *p_i2s_obj[I2S_NUM_MAX] = {0};
@@ -172,6 +175,12 @@ esp_err_t i2s_enable_tx_intr(i2s_port_t i2s_num)
     I2S[i2s_num]->int_ena.out_dscr_err = 1;
     I2S_EXIT_CRITICAL();
     return ESP_OK;
+}
+
+float i2s_get_clk(i2s_port_t i2s_num)
+{
+    I2S_CHECK((i2s_num < I2S_NUM_MAX), "i2s_num error", ESP_ERR_INVALID_ARG);
+    return p_i2s_obj[i2s_num]->real_rate;
 }
 
 static esp_err_t i2s_isr_register(i2s_port_t i2s_num, int intr_alloc_flags, void (*fn)(void*), void * arg, i2s_isr_handle_t *handle)
@@ -409,11 +418,14 @@ esp_err_t i2s_set_clk(i2s_port_t i2s_num, uint32_t rate, i2s_bits_per_sample_t b
     }
 
     double mclk;
+    int sdm0, sdm1, sdm2, odir, m_scale = 8;
+    int fi2s_clk = rate*channel*bits*m_scale;
     if (p_i2s_obj[i2s_num]->mode & (I2S_MODE_DAC_BUILT_IN | I2S_MODE_ADC_BUILT_IN)) {
         //DAC uses bclk as sample clock, not WS. WS can be something arbitrary.
         //Rate as given to this function is the intended sample rate;
         //According to the TRM, WS clk equals to the sample rate, and bclk is double the speed of WS
-        uint32_t b_clk = rate * 2;
+        uint32_t b_clk = rate * I2S_AD_BCK_FACTOR;
+        fi2s_clk /= I2S_AD_BCK_FACTOR;
         int factor2 = 60;
         mclk = b_clk * factor2;
         clkmdiv = ((double) I2S_BASE_CLK) / mclk;
@@ -425,9 +437,11 @@ esp_err_t i2s_set_clk(i2s_port_t i2s_num, uint32_t rate, i2s_bits_per_sample_t b
         if (p_i2s_obj[i2s_num]->mode & I2S_MODE_TX) {
             int fp = I2S[i2s_num]->pdm_freq_conf.tx_pdm_fp;
             int fs = I2S[i2s_num]->pdm_freq_conf.tx_pdm_fs;
-            b_clk = rate * 64 * (fp / fs);
+            b_clk = rate * I2S_PDM_BCK_FACTOR * (fp / fs);
+            fi2s_clk /= (I2S_PDM_BCK_FACTOR * (fp / fs));
         } else if (p_i2s_obj[i2s_num]->mode & I2S_MODE_RX) {
-            b_clk = rate * 64 * (I2S[i2s_num]->pdm_conf.rx_sinc_dsr_16_en + 1);
+            b_clk = rate * I2S_PDM_BCK_FACTOR * (I2S[i2s_num]->pdm_conf.rx_sinc_dsr_16_en + 1);
+            fi2s_clk /= (I2S_PDM_BCK_FACTOR * (I2S[i2s_num]->pdm_conf.rx_sinc_dsr_16_en + 1));
         }
         int factor2 = 5 ;
         mclk = b_clk * factor2;
@@ -441,8 +455,7 @@ esp_err_t i2s_set_clk(i2s_port_t i2s_num, uint32_t rate, i2s_bits_per_sample_t b
         mclk = clkmInteger + denom * clkmDecimals;
         bck = factor/(bits * channel);
     }
-    int sdm0, sdm1, sdm2, odir, m_scale = 8;
-    int fi2s_clk = rate*channel*bits*m_scale;
+
     if(p_i2s_obj[i2s_num]->use_apll && p_i2s_obj[i2s_num]->fixed_mclk) {
         fi2s_clk = p_i2s_obj[i2s_num]->fixed_mclk;
         m_scale = fi2s_clk/bits/rate/channel;
@@ -457,6 +470,7 @@ esp_err_t i2s_set_clk(i2s_port_t i2s_num, uint32_t rate, i2s_bits_per_sample_t b
         I2S[i2s_num]->sample_rate_conf.rx_bck_div_num = m_scale;
         I2S[i2s_num]->clkm_conf.clka_en = 1;
         double fi2s_rate = i2s_apll_get_fi2s(bits, sdm0, sdm1, sdm2, odir);
+        p_i2s_obj[i2s_num]->real_rate = fi2s_rate/bits/channel/m_scale;
         ESP_LOGI(I2S_TAG, "APLL: Req RATE: %d, real rate: %0.3f, BITS: %u, CLKM: %u, BCK_M: %u, MCLK: %0.3f, SCLK: %f, diva: %d, divb: %d",
             rate, fi2s_rate/bits/channel/m_scale, bits, 1, m_scale, fi2s_rate, fi2s_rate/8, 1, 0);
     } else {
@@ -467,6 +481,7 @@ esp_err_t i2s_set_clk(i2s_port_t i2s_num, uint32_t rate, i2s_bits_per_sample_t b
         I2S[i2s_num]->sample_rate_conf.tx_bck_div_num = bck;
         I2S[i2s_num]->sample_rate_conf.rx_bck_div_num = bck;
         double real_rate = (double) (I2S_BASE_CLK / (bck * bits * clkmInteger) / 2);
+        p_i2s_obj[i2s_num]->real_rate = real_rate;
         ESP_LOGI(I2S_TAG, "PLL_D2: Req RATE: %d, real rate: %0.3f, BITS: %u, CLKM: %u, BCK: %u, MCLK: %0.3f, SCLK: %f, diva: %d, divb: %d",
             rate, real_rate, bits, clkmInteger, bck, (double)I2S_BASE_CLK / mclk, real_rate*bits*channel, 64, clkmDecimals);
     }
@@ -853,6 +868,13 @@ esp_err_t i2s_set_sample_rates(i2s_port_t i2s_num, uint32_t rate)
     I2S_CHECK((i2s_num < I2S_NUM_MAX), "i2s_num error", ESP_ERR_INVALID_ARG);
     I2S_CHECK((p_i2s_obj[i2s_num]->bytes_per_sample > 0), "bits_per_sample not set", ESP_ERR_INVALID_ARG);
     return i2s_set_clk(i2s_num, rate, p_i2s_obj[i2s_num]->bits_per_sample, p_i2s_obj[i2s_num]->channel_num);
+}
+
+esp_err_t i2s_set_pdm_rx_down_sample(i2s_port_t i2s_num, i2s_pdm_dsr_t dsr)
+{
+    I2S_CHECK((i2s_num < I2S_NUM_MAX), "i2s_num error", ESP_ERR_INVALID_ARG);
+    I2S[i2s_num]->pdm_conf.rx_sinc_dsr_16_en = dsr;
+    return i2s_set_clk(i2s_num, p_i2s_obj[i2s_num]->sample_rate, p_i2s_obj[i2s_num]->bits_per_sample, p_i2s_obj[i2s_num]->channel_num);
 }
 
 static esp_err_t i2s_param_config(i2s_port_t i2s_num, const i2s_config_t *i2s_config)

@@ -120,7 +120,7 @@ build_example () {
     cp -r "${EXAMPLE_DIR}" "example_builds/${ID}"
     pushd "example_builds/${ID}/${EXAMPLE_NAME}"
         # be stricter in the CI build than the default IDF settings
-        export EXTRA_CFLAGS="-Werror -Werror=deprecated-declarations"
+        export EXTRA_CFLAGS=${PEDANTIC_CFLAGS}
         export EXTRA_CXXFLAGS=${EXTRA_CFLAGS}
 
         # sdkconfig files are normally not checked into git, but may be present when
@@ -137,9 +137,13 @@ build_example () {
         local BUILDLOG=${LOG_PATH}/ex_${ID}_log.txt
         touch ${BUILDLOG}
 
-        idf.py fullclean >>${BUILDLOG} 2>&1 &&
-        idf.py build >>${BUILDLOG} 2>&1 &&
-        cp build/flash_project_args build/download.config || # backwards compatible download.config filename
+        if [ "$EXAMPLE_NAME" != "idf_as_lib" ]; then
+            idf.py fullclean >>${BUILDLOG} 2>&1 &&
+            idf.py build >>${BUILDLOG} 2>&1
+        else
+            rm -rf build &&
+            ./build.sh >>${BUILDLOG} 2>&1
+        fi ||
         {
             RESULT=$?; FAILED_EXAMPLES+=" ${EXAMPLE_NAME}" ;
         }
