@@ -33,6 +33,8 @@
 # spachner21 in the Silicon Labs Interface Forum.  It is provided here
 # as public domain.
 
+from __future__ import print_function
+
 import sys
 import serial.tools.list_ports
 
@@ -49,10 +51,10 @@ pl.sort(key=lambda x: x.location, reverse=False)
 if len(sys.argv) > 1:
     for p in pl:
         if str(p.location) == sys.argv[1]:
-            print p.device
+            print(p.device)
             break
     else:
-        print sys.argv[1]
+        print(sys.argv[1])
 else:
     for p in pl:
-        print p.location + " " + p.device
+        print(p.location + " " + p.device)
