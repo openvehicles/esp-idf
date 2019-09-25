@@ -135,12 +135,12 @@ typedef struct {
 	 *
 	 * Any value other than portMUX_FREE_VAL, CORE_ID_PRO, CORE_ID_APP indicates corruption
 	 */
-	uint32_t owner;
+	volatile uint32_t owner;
 	/* count field:
 	 * If mux is unlocked, count should be zero.
 	 * If mux is locked, count is non-zero & represents the number of recursive locks on the mux.
 	 */
-	uint32_t count;
+	volatile uint32_t count;
 #ifdef CONFIG_FREERTOS_PORTMUX_DEBUG
 	const char *lastLockedFn;
 	int lastLockedLine;
@@ -197,7 +197,7 @@ This all assumes that interrupts are either entirely disabled or enabled. Interr
 will break this scheme.
 
 Remark: For the ESP32, portENTER_CRITICAL and portENTER_CRITICAL_ISR both alias vTaskEnterCritical, meaning
-that either function can be called both from ISR as well as task context. This is not standard FreeRTOS 
+that either function can be called both from ISR as well as task context. This is not standard FreeRTOS
 behaviour; please keep this in mind if you need any compatibility with other FreeRTOS implementations.
 */
 void vPortCPUInitializeMutex(portMUX_TYPE *mux);
