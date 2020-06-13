@@ -427,6 +427,15 @@ export HOSTCC HOSTLD HOSTAR HOSTOBJCOPY SIZE
 # Set target compiler. Defaults to whatever the user has
 # configured as prefix + ye olde gcc commands
 CC := $(call dequote,$(CONFIG_TOOLPREFIX))gcc
+# FreeBSD doesn't have gcc in the base system, use cc if not cross compiling
+ifeq ($(CC), gcc)
+ifdef HOSTTYPE
+ifeq ($(HOSTTYPE), FreeBSD)
+#$(error howdy CC=${CC})
+CC := cc
+endif
+endif
+endif
 CXX := $(call dequote,$(CONFIG_TOOLPREFIX))c++
 LD := $(call dequote,$(CONFIG_TOOLPREFIX))ld
 AR := $(call dequote,$(CONFIG_TOOLPREFIX))ar
