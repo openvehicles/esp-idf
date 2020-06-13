@@ -40,6 +40,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/FreeRTOSConfig.h>
 #include <freertos/task.h>
+#include <freertos/timers.h>
 #include <freertos/semphr.h>
 #endif
 
@@ -81,7 +82,7 @@ typedef struct {
 } cached_tag_entry_t;
 
 typedef struct uncached_tag_entry_{
-    SLIST_ENTRY(uncached_tag_entry_) entries; 
+    SLIST_ENTRY(uncached_tag_entry_) entries;
     uint8_t level;  // esp_log_level_t as uint8_t
     char tag[0];    // beginning of a zero-terminated string
 } uncached_tag_entry_t;
@@ -159,7 +160,7 @@ void esp_log_level_set(const char* tag, esp_log_level_t level)
         SLIST_INSERT_HEAD( &s_log_tags, new_entry, entries );
     }
 
-    //search in the cache and update it if exist         
+    //search in the cache and update it if exist
     for (int i = 0; i < s_log_cache_entry_count; ++i) {
 #ifdef LOG_BUILTIN_CHECKS
         assert(i == 0 || s_log_cache[(i - 1) / 2].generation < s_log_cache[i].generation);
@@ -191,6 +192,18 @@ void IRAM_ATTR esp_log_write(esp_log_level_t level,
     if (!s_log_mutex) {
         s_log_mutex = xSemaphoreCreateMutex();
     }
+#if ( configUSE_TIMERS == 1 ) && ( INCLUDE_xTimerGetTimerDaemonTaskHandle == 0 )
+    #warning "Logging from timer context may block, consider enabling INCLUDE_xTimerGetTimerDaemonTaskHandle"
+#elif ( configUSE_TIMERS == 1 ) && ( INCLUDE_xTimerGetTimerDaemonTaskHandle == 1 )
+    // Avoid blocking in timer context:
+    if (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING
+            || xTaskGetCurrentTaskHandle() == xTimerGetTimerDaemonTaskHandle()) {
+        if (xSemaphoreTake(s_log_mutex, 0) == pdFALSE) {
+            return;
+        }
+    }
+    else
+#endif
     if (xSemaphoreTake(s_log_mutex, MAX_MUTEX_WAIT_TICKS) == pdFALSE) {
         return;
     }
@@ -438,7 +451,7 @@ void esp_log_buffer_hexdump_internal( const char *tag, const void *buffer, uint1
             ptr_line = buffer;
         }
         ptr_hd = hd_buffer;
-        
+
         ptr_hd += sprintf( ptr_hd, "%p ", buffer );
         for( int i = 0; i < BYTES_PER_LINE; i ++ ) {
             if ( (i&7)==0 ) {
