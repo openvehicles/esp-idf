@@ -177,6 +177,28 @@ static void task_wdt_isr(void *arg)
     portEXIT_CRITICAL_ISR(&twdt_spinlock);
 }
 
+void esp_task_wdt_get_trigger_tasknames(char *buf, size_t bufsize)
+{
+    twdt_task_t *twdttask;
+    char *wpos = buf;
+    if (!buf || !bufsize)
+        return;
+    *wpos = 0;
+    if (!twdt_config)
+        return;
+    for (twdttask=twdt_config->list; twdttask!=NULL; twdttask=twdttask->next) {
+        if (!twdttask->has_reset) {
+            if (wpos != buf) {
+                *wpos++ = '|';
+                *wpos = 0;
+            }
+            wpos += strlcpy(wpos, pcTaskGetTaskName(twdttask->task_handle), (bufsize-(wpos-buf)));
+            if (wpos - buf >= bufsize - 2)
+                break;
+        }
+    }
+}
+
 /*
  * Initializes the TWDT by allocating memory for the config data
  * structure, obtaining the idle task handles/registering idle hooks, and

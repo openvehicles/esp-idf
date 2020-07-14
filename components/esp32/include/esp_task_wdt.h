@@ -157,6 +157,15 @@ esp_err_t esp_task_wdt_status(TaskHandle_t handle);
   */
 void esp_task_wdt_feed() __attribute__ ((deprecated));
 
+/**
+  * @brief  Get names of tasks that triggered the WDT
+  *
+  * Intended to be called in an error callback (see xt_set_error_handler_callback()).
+  * Fills the buffer with a pipe ('|') separated list of the names of the tasks that
+  * failed to reset the watchdog in time. The result is zero-terminated (C string).
+  */
+void esp_task_wdt_get_trigger_tasknames(char *buf, size_t bufsize);
+
 
 #ifdef __cplusplus
 }
