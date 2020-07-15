@@ -13,7 +13,7 @@ PROTOCOL_VERSIONS = [1, 2]
 
 def parse_testcases(version):
     with open("testcases_v%d.txt" % version, "r") as f:
-        cases = [l for l in f.readlines() if len(l.strip()) > 0]
+        cases = [line for line in f.readlines() if len(line.strip()) > 0]
     # Each 3 lines in the file should be formatted as:
     # * Description of the test change
     # * JSON "changes" to send to the server
@@ -51,9 +51,7 @@ def main():
 
         cmdline = "../confserver.py --kconfig Kconfig --config %s" % temp_sdkconfig_path
         print("Running: %s" % cmdline)
-        p = pexpect.spawn(cmdline, timeout=0.5)
-        p.logfile = args.logfile
-        p.setecho(False)
+        p = pexpect.spawn(cmdline, timeout=30, logfile=args.logfile, echo=False, use_poll=True, maxread=1)
 
         p.expect("Server running.+\r\n")
         initial = expect_json(p)

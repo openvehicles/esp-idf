@@ -785,9 +785,9 @@ uint32_t IRAM_ATTR touch_pad_get_status()
 
 esp_err_t IRAM_ATTR touch_pad_clear_status()
 {
-    portENTER_CRITICAL(&rtc_spinlock);
+    portENTER_CRITICAL_SAFE(&rtc_spinlock);
     SENS.sar_touch_ctrl2.touch_meas_en_clr = 1;
-    portEXIT_CRITICAL(&rtc_spinlock);
+    portEXIT_CRITICAL_SAFE(&rtc_spinlock);
     return ESP_OK;
 }
 
@@ -995,7 +995,7 @@ esp_err_t touch_pad_filter_start(uint32_t filter_period_ms)
     }
     if (s_touch_pad_filter->timer == NULL) {
         s_touch_pad_filter->timer = xTimerCreate("filter_tmr", filter_period_ms / portTICK_PERIOD_MS, pdFALSE,
-        NULL, touch_pad_filter_cb);
+        NULL, (void(*)(TimerHandle_t))touch_pad_filter_cb);
         if (s_touch_pad_filter->timer == NULL) {
             ret = ESP_ERR_NO_MEM;
         }
@@ -1217,10 +1217,12 @@ esp_err_t adc_set_data_inv(adc_unit_t adc_unit, bool inv_en)
     if (adc_unit & ADC_UNIT_1) {
         // Enable ADC data invert
         SENS.sar_read_ctrl.sar1_data_inv = inv_en;
+        SYSCON.saradc_ctrl2.sar1_inv = inv_en;
     }
     if (adc_unit & ADC_UNIT_2) {
         // Enable ADC data invert
         SENS.sar_read_ctrl2.sar2_data_inv = inv_en;
+        SYSCON.saradc_ctrl2.sar2_inv = inv_en;
     }
     portEXIT_CRITICAL(&rtc_spinlock);
     return ESP_OK;

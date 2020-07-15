@@ -21,14 +21,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-
-#ifndef FALSE
-#  define FALSE  false
-#endif
-
-#ifndef TRUE
-#  define TRUE   true
-#endif
+#include "bt_common.h"
 
 typedef uint8_t UINT8;
 typedef uint16_t UINT16;
@@ -43,8 +36,8 @@ typedef bool BOOLEAN;
 #define PACKED  __packed
 // #define INLINE  __inline
 
-#define BCM_STRCPY_S(x1,x2,x3)      strcpy((x1),(x3))
-#define BCM_STRNCPY_S(x1,x2,x3,x4)  strncpy((x1),(x3),(x4))
+#define BCM_STRCPY_S(x1,x2)      strcpy((x1),(x2))
+#define BCM_STRNCPY_S(x1,x2,x3)  strncpy((x1),(x2),(x3))
 
 /* READ WELL !!
 **
@@ -523,19 +516,6 @@ typedef struct {
 #define BT_DEVICE_TYPE_DUMO    0x03
 typedef UINT8 tBT_DEVICE_TYPE;
 /*****************************************************************************/
-
-
-/* Define trace levels */
-#define BT_TRACE_LEVEL_NONE    0          /* No trace messages to be generated    */
-#define BT_TRACE_LEVEL_ERROR   1          /* Error condition trace messages       */
-#define BT_TRACE_LEVEL_WARNING 2          /* Warning condition trace messages     */
-#define BT_TRACE_LEVEL_API     3          /* API traces                           */
-#define BT_TRACE_LEVEL_EVENT   4          /* Debug messages for events            */
-#define BT_TRACE_LEVEL_DEBUG   5          /* Full debug messages                  */
-#define BT_TRACE_LEVEL_VERBOSE 6          /* Verbose debug messages               */
-
-#define MAX_TRACE_LEVEL        6
-
 
 /* Define New Trace Type Definition */
 /* TRACE_CTRL_TYPE                  0x^^000000*/

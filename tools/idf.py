@@ -66,7 +66,7 @@ GENERATORS = \
     [
         # ('generator name', 'build command line', 'version command line', 'verbose flag')
         ("Ninja", ["ninja"], ["ninja", "--version"], "-v"),
-        (MAKE_GENERATOR, [MAKE_CMD, "-j", str(multiprocessing.cpu_count() + 2)], ["make", "--version"], "VERBOSE=1"),
+        (MAKE_GENERATOR, [MAKE_CMD, "-j", str(multiprocessing.cpu_count() + 2)], [MAKE_CMD, "--version"], "VERBOSE=1"),
     ]
 GENERATOR_CMDS = dict((a[0], a[1]) for a in GENERATORS)
 GENERATOR_VERBOSE = dict((a[0], a[3]) for a in GENERATORS)
@@ -136,6 +136,32 @@ def detect_cmake_generator():
     raise FatalError("To use idf.py, either the 'ninja' or 'GNU make' build tool must be available in the PATH")
 
 
+def _strip_quotes(value, regexp=re.compile(r"^\"(.*)\"$|^'(.*)'$|^(.*)$")):
+    """
+    Strip quotes like CMake does during parsing cache entries
+    """
+
+    return [x for x in regexp.match(value).groups() if x is not None][0].rstrip()
+
+
+def _new_cmakecache_entries(cache_path, new_cache_entries):
+    if not os.path.exists(cache_path):
+        return True
+
+    current_cache = parse_cmakecache(cache_path)
+
+    if new_cache_entries:
+        current_cache = parse_cmakecache(cache_path)
+
+        for entry in new_cache_entries:
+            key, value = entry.split("=", 1)
+            current_value = current_cache.get(key, None)
+            if current_value is None or _strip_quotes(value) != current_value:
+                return True
+
+    return False
+
+
 def _ensure_build_directory(args, always_run_cmake=False):
     """Check the build directory exists and that cmake has been run there.
 
@@ -161,7 +187,8 @@ def _ensure_build_directory(args, always_run_cmake=False):
     if not os.path.isdir(build_dir):
         os.makedirs(build_dir)
     cache_path = os.path.join(build_dir, "CMakeCache.txt")
-    if not os.path.exists(cache_path) or always_run_cmake:
+
+    if always_run_cmake or _new_cmakecache_entries(cache_path, args.define_cache_entry):
         if args.generator is None:
             args.generator = detect_cmake_generator()
         try:
@@ -216,7 +243,7 @@ def parse_cmakecache(path):
         for line in f:
             # cmake cache lines look like: CMAKE_CXX_FLAGS_DEBUG:STRING=-g
             # groups are name, type, value
-            m = re.match(r"^([^#/:=]+):([^:=]+)=(.+)\n$", line)
+            m = re.match(r"^([^#/:=]+):([^:=]+)=(.*)\n$", line)
             if m:
                 result[m.group(1)] = m.group(3)
     return result
@@ -497,7 +524,7 @@ def get_default_serial_port():
     ports = list(reversed(sorted(
         p.device for p in serial.tools.list_ports.comports())))
     try:
-        print("Choosing default port %s (use '-p PORT' option to set a specific serial port)" % ports[0])
+        print("Choosing default port %s (use '-p PORT' option to set a specific serial port)" % ports[0].encode('ascii', 'ignore'))
         return ports[0]
     except IndexError:
         raise RuntimeError("No serial ports found. Connect a device, or use '-p PORT' option to set a specific port.")

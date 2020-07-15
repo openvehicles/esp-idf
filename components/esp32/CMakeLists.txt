@@ -33,7 +33,6 @@ else()
                    "hw_random.c"
                    "int_wdt.c"
                    "intr_alloc.c"
-                   "ipc.c"
                    "lib_printf.c"
                    "panic.c"
                    "phy_init.c"
@@ -52,6 +51,10 @@ else()
                    "hwcrypto/aes.c"
                    "hwcrypto/sha.c")
     set(COMPONENT_ADD_INCLUDEDIRS "include")
+
+    if(NOT CONFIG_FREERTOS_UNICORE)
+        list(APPEND COMPONENT_SRCS "ipc.c")
+    endif()
 
     set(COMPONENT_REQUIRES driver tcpip_adapter esp_event efuse)
     # driver is a public requirement because esp_sleep.h uses gpio_num_t & touch_pad_t
@@ -151,7 +154,7 @@ else()
             DEPENDS ${CMAKE_CURRENT_LIST_DIR}/phy_init_data.h
             COMMAND ${CMAKE_C_COMPILER} -x c -c
             -I ${CMAKE_CURRENT_LIST_DIR} -I ${CMAKE_CURRENT_LIST_DIR}/include -I ${IDF_BUILD_ARTIFACTS_DIR}
-            -o phy_init_data.obj
+            -I ${CONFIG_DIR} -o phy_init_data.obj
             ${CMAKE_CURRENT_LIST_DIR}/phy_init_data.h
             COMMAND ${CMAKE_OBJCOPY} -O binary phy_init_data.obj ${PHY_INIT_DATA_BIN}
             )

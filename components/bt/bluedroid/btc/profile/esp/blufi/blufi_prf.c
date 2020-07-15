@@ -147,6 +147,7 @@ static void blufi_profile_cb(tBTA_GATTS_EVT event, tBTA_GATTS *p_data)
 
             if (blufi_env.prepare_buf == NULL) {
                 blufi_env.prepare_buf = osi_malloc(BLUFI_PREPAIR_BUF_MAX_SIZE);
+                blufi_env.prepare_len = 0;
                 if (blufi_env.prepare_buf == NULL) {
                     BLUFI_TRACE_ERROR("Blufi prep no mem\n");
                     status = GATT_NO_RESOURCES;
@@ -174,6 +175,7 @@ static void blufi_profile_cb(tBTA_GATTS_EVT event, tBTA_GATTS *p_data)
                 if (blufi_env.prepare_buf) {
                     osi_free(blufi_env.prepare_buf);
                     blufi_env.prepare_buf = NULL;
+                    blufi_env.prepare_len = 0;
                 }
                 BLUFI_TRACE_ERROR("write data error , error code 0x%x\n", status);
                 return;
@@ -209,6 +211,7 @@ static void blufi_profile_cb(tBTA_GATTS_EVT event, tBTA_GATTS *p_data)
         if (blufi_env.prepare_buf) {
             osi_free(blufi_env.prepare_buf);
             blufi_env.prepare_buf = NULL;
+            blufi_env.prepare_len = 0;
         }
 
         break;
@@ -426,11 +429,19 @@ static void btc_blufi_recv_handler(uint8_t *data, int len)
             blufi_env.aggr_buf = osi_malloc(blufi_env.total_len);
             if (blufi_env.aggr_buf == NULL) {
                 BTC_TRACE_ERROR("%s no mem, len %d\n", __func__, blufi_env.total_len);
+                btc_blufi_report_error(ESP_BLUFI_DH_MALLOC_ERROR);
                 return;
             }
         }
-        memcpy(blufi_env.aggr_buf + blufi_env.offset, hdr->data + 2, hdr->data_len  - 2);
-        blufi_env.offset += (hdr->data_len - 2);
+        if (blufi_env.offset + hdr->data_len  - 2 <= blufi_env.total_len){
+            memcpy(blufi_env.aggr_buf + blufi_env.offset, hdr->data + 2, hdr->data_len  - 2);
+            blufi_env.offset += (hdr->data_len - 2);
+        } else {
+            BTC_TRACE_ERROR("%s payload is longer than packet length, len %d \n", __func__, blufi_env.total_len);
+            btc_blufi_report_error(ESP_BLUFI_DATA_FORMAT_ERROR);
+            return;
+        }
+
     } else {
         if (blufi_env.offset > 0) {   /* if previous pkt is frag */
             memcpy(blufi_env.aggr_buf + blufi_env.offset, hdr->data, hdr->data_len);
@@ -585,7 +596,7 @@ static void btc_blufi_wifi_conn_report(uint8_t opmode, uint8_t sta_conn_state, u
             *p++ = info->softap_max_conn_num;
         }
         if (info->softap_channel_set) {
-            *p++ = BLUFI_TYPE_DATA_SUBTYPE_SOFTAP_MAX_CONN_NUM;
+            *p++ = BLUFI_TYPE_DATA_SUBTYPE_SOFTAP_CHANNEL;
             *p++ = 1;
             *p++ = info->softap_channel;
         }

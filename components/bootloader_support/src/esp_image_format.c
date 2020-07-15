@@ -24,6 +24,7 @@
 #include <bootloader_random.h>
 #include <bootloader_sha.h>
 #include "bootloader_util.h"
+#include "bootloader_common.h"
 
 /* Checking signatures as part of verifying images is necessary:
    - Always if secure boot is enabled
@@ -280,6 +281,9 @@ static esp_err_t verify_image_header(uint32_t src_addr, const esp_image_header_t
         }
         err = ESP_ERR_IMAGE_INVALID;
     }
+    if (bootloader_common_check_chip_validity(image, ESP_IMAGE_APPLICATION) != ESP_OK) {
+        err = ESP_ERR_IMAGE_INVALID;
+    }
     if (!silent) {
         if (image->spi_mode > ESP_IMAGE_SPI_MODE_SLOW_READ) {
             ESP_LOGW(TAG, "image at 0x%x has invalid SPI mode %d", src_addr, image->spi_mode);
@@ -368,24 +372,22 @@ static esp_err_t process_segment(int index, uint32_t flash_addr, esp_image_segme
     }
 #endif // BOOTLOADER_BUILD
 
-#ifndef BOOTLOADER_BUILD
-    uint32_t free_page_count = spi_flash_mmap_get_free_pages(SPI_FLASH_MMAP_DATA);
-    ESP_LOGD(TAG, "free data page_count 0x%08x",free_page_count);
-    uint32_t offset_page = 0;
-    while (data_len >= free_page_count * SPI_FLASH_MMU_PAGE_SIZE) {
-        offset_page = ((data_addr & MMAP_ALIGNED_MASK) != 0)?1:0;
-        err = process_segment_data(load_addr, data_addr, (free_page_count - offset_page) * SPI_FLASH_MMU_PAGE_SIZE, do_load, sha_handle, checksum);
+    uint32_t free_page_count = bootloader_mmap_get_free_pages();
+    ESP_LOGD(TAG, "free data page_count 0x%08x", free_page_count);
+
+    int32_t data_len_remain = data_len;
+    while (data_len_remain > 0) {
+        uint32_t offset_page = ((data_addr & MMAP_ALIGNED_MASK) != 0) ? 1 : 0;
+        /* Data we could map in case we are not aligned to PAGE boundary is one page size lesser. */
+        data_len = MIN(data_len_remain, ((free_page_count - offset_page) * SPI_FLASH_MMU_PAGE_SIZE));
+        err = process_segment_data(load_addr, data_addr, data_len, do_load, sha_handle, checksum);
         if (err != ESP_OK) {
             return err;
         }
-        data_addr += (free_page_count - offset_page) * SPI_FLASH_MMU_PAGE_SIZE;
-        data_len -= (free_page_count - offset_page) * SPI_FLASH_MMU_PAGE_SIZE;
+        data_addr += data_len;
+        data_len_remain -= data_len;
     }
-#endif
-    err = process_segment_data(load_addr, data_addr, data_len, do_load, sha_handle, checksum);
-    if (err != ESP_OK) {
-        return err;
-    }
+
     return ESP_OK;
 
 err:

@@ -174,7 +174,7 @@ void BTA_DmSetDeviceName(const char *p_name)
     if ((p_msg = (tBTA_DM_API_SET_NAME *) osi_malloc(sizeof(tBTA_DM_API_SET_NAME))) != NULL) {
         p_msg->hdr.event = BTA_DM_API_SET_NAME_EVT;
         /* truncate the name if needed */
-        BCM_STRNCPY_S((char *)p_msg->name, sizeof(p_msg->name), p_name, BD_NAME_LEN - 1);
+        BCM_STRNCPY_S((char *)p_msg->name, p_name, BD_NAME_LEN - 1);
         p_msg->name[BD_NAME_LEN - 1] = 0;
 
         bta_sys_sendmsg(p_msg);
@@ -736,7 +736,7 @@ UINT16 BTA_DmGetConnectionState( BD_ADDR bd_addr )
 **
 ** Description      This function adds a DI record to the local SDP database.
 **
-** Returns          BTA_SUCCESS if record set sucessfully, otherwise error code.
+** Returns          BTA_SUCCESS if record set successfully, otherwise error code.
 **
 *******************************************************************************/
 tBTA_STATUS BTA_DmSetLocalDiRecord( tBTA_DI_RECORD *p_device_info,
@@ -1819,7 +1819,7 @@ void BTA_DmBleConfigLocalIcon(uint16_t icon)
 **                  p_cback: callback function associated to this adv instance.
 **                  p_ref: reference data pointer to this adv instance.
 **
-** Returns          BTA_SUCCESS if command started sucessfully; otherwise failure.
+** Returns          BTA_SUCCESS if command started successfully; otherwise failure.
 **
 *******************************************************************************/
 void BTA_BleEnableAdvInstance (tBTA_BLE_ADV_PARAMS *p_params,
@@ -1857,7 +1857,7 @@ void BTA_BleEnableAdvInstance (tBTA_BLE_ADV_PARAMS *p_params,
 ** Parameters       inst_id: Adv instance to update the parameter.
 **                  p_params: pointer to the adv parameter structure.
 **
-** Returns          BTA_SUCCESS if command started sucessfully; otherwise failure.
+** Returns          BTA_SUCCESS if command started successfully; otherwise failure.
 **
 *******************************************************************************/
 void BTA_BleUpdateAdvInstParam (UINT8 inst_id, tBTA_BLE_ADV_PARAMS *p_params)
@@ -1892,7 +1892,7 @@ void BTA_BleUpdateAdvInstParam (UINT8 inst_id, tBTA_BLE_ADV_PARAMS *p_params)
 **                  memory space can not be freed until BTA_BLE_MULTI_ADV_DATA_EVT
 **                  is sent to application.
 **
-** Returns          BTA_SUCCESS if command started sucessfully; otherwise failure.
+** Returns          BTA_SUCCESS if command started successfully; otherwise failure.
 **
 *******************************************************************************/
 void BTA_BleCfgAdvInstData (UINT8 inst_id, BOOLEAN is_scan_rsp,
@@ -1925,7 +1925,7 @@ void BTA_BleCfgAdvInstData (UINT8 inst_id, BOOLEAN is_scan_rsp,
 **
 ** Parameter        inst_id: instance ID to disable.
 **
-** Returns          BTA_SUCCESS if command started sucessfully; otherwise failure.
+** Returns          BTA_SUCCESS if command started successfully; otherwise failure.
 **
 *******************************************************************************/
 void BTA_BleDisableAdvInstance (UINT8  inst_id)     //this function just used for vendor debug

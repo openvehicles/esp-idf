@@ -56,16 +56,14 @@ if(NOT BOOTLOADER_BUILD)
     set(ESPTOOLPY_ELF2IMAGE_OPTIONS --elf-sha256-offset 0xb0)
 endif()
 
+if(CONFIG_ESP32_REV_MIN)
+    set(ESPTOOLPY_ELF2IMAGE_OPTIONS ${ESPTOOLPY_ELF2IMAGE_OPTIONS} --min-rev ${CONFIG_ESP32_REV_MIN})
+endif()
+
 if(CONFIG_ESPTOOLPY_FLASHSIZE_DETECT)
     # Set ESPFLASHSIZE to 'detect' *after* elf2image options are generated,
     # as elf2image can't have 'detect' as an option...
     set(ESPFLASHSIZE detect)
-endif()
-
-# Set variables if the PHY data partition is in the flash
-if(CONFIG_ESP32_PHY_INIT_DATA_IN_PARTITION)
-    set(PHY_PARTITION_OFFSET   ${CONFIG_PHY_DATA_OFFSET})
-    set(PHY_PARTITION_BIN_FILE "esp32/phy_init_data.bin")
 endif()
 
 get_filename_component(IDF_PROJECT_NAME ${IDF_PROJECT_EXECUTABLE} NAME_WE)
@@ -129,7 +127,7 @@ function(esptool_py_custom_target target_name flasher_filename dependencies)
         -D ESPTOOLPY="${ESPTOOLPY}"
         -D ESPTOOL_ARGS="write_flash;@flash_${flasher_filename}_args"
         -D ESPTOOL_WORKING_DIR="${IDF_BUILD_ARTIFACTS_DIR}"
-        -P run_esptool.cmake
+        -P ${IDF_PATH}/components/esptool_py/run_esptool.cmake
         WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         USES_TERMINAL
         )

@@ -19,6 +19,9 @@
 #if __has_include("esp_http_server.h")
 #include "esp_http_server.h"
 #endif
+#if __has_include("esp_https_ota.h")
+#include "esp_https_ota.h"
+#endif
 #if __has_include("esp_image_format.h")
 #include "esp_image_format.h"
 #endif
@@ -322,6 +325,15 @@ static const esp_err_msg_t esp_err_msg_table[] = {
 #   ifdef      ESP_ERR_WIFI_NOT_CONNECT
     ERR_TBL_IT(ESP_ERR_WIFI_NOT_CONNECT),                   /* 12303 0x300f Station still in disconnect status */
 #   endif
+#   ifdef      ESP_ERR_WIFI_POST
+    ERR_TBL_IT(ESP_ERR_WIFI_POST),                          /* 12306 0x3012 Failed to post the event to WiFi task */
+#   endif
+#   ifdef      ESP_ERR_WIFI_INIT_STATE
+    ERR_TBL_IT(ESP_ERR_WIFI_INIT_STATE),                    /* 12307 0x3013 Invalod WiFi state when init/deinit is called */
+#   endif
+#   ifdef      ESP_ERR_WIFI_STOP_STATE
+    ERR_TBL_IT(ESP_ERR_WIFI_STOP_STATE),                    /* 12308 0x3014 Returned when WiFi is stopping */
+#   endif
     // components/esp32/include/esp_wps.h
 #   ifdef      ESP_ERR_WIFI_REGISTRAR
     ERR_TBL_IT(ESP_ERR_WIFI_REGISTRAR),                     /* 12339 0x3033 WPS registrar is not supported */
@@ -522,6 +534,13 @@ static const esp_err_msg_t esp_err_msg_table[] = {
 #   endif
 #   ifdef      ESP_ERR_HTTPD_TASK
     ERR_TBL_IT(ESP_ERR_HTTPD_TASK),                         /* 32776 0x8008 Failed to launch server task/thread */
+#   endif
+    // components/esp_https_ota/include/esp_https_ota.h
+#   ifdef      ESP_ERR_HTTPS_OTA_BASE
+    ERR_TBL_IT(ESP_ERR_HTTPS_OTA_BASE),                     /* 36864 0x9000 */
+#   endif
+#   ifdef      ESP_ERR_HTTPS_OTA_IN_PROGRESS
+    ERR_TBL_IT(ESP_ERR_HTTPS_OTA_IN_PROGRESS),              /* 36865 0x9001 */
 #   endif
     // components/spi_flash/include/esp_spi_flash.h
 #   ifdef      ESP_ERR_FLASH_BASE

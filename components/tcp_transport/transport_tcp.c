@@ -34,18 +34,20 @@ typedef struct {
 
 static int resolve_dns(const char *host, struct sockaddr_in *ip) {
 
-    struct hostent *he;
-    struct in_addr **addr_list;
-    he = gethostbyname(host);
-    if (he == NULL) {
-        return ESP_FAIL;
-    }
-    addr_list = (struct in_addr **)he->h_addr_list;
-    if (addr_list[0] == NULL) {
+    const struct addrinfo hints = {
+        .ai_family = AF_INET,
+        .ai_socktype = SOCK_STREAM,
+    };
+    struct addrinfo *res;
+
+    int err = getaddrinfo(host, NULL, &hints, &res);
+    if(err != 0 || res == NULL) {
+        ESP_LOGE(TAG, "DNS lookup failed err=%d res=%p", err, res);
         return ESP_FAIL;
     }
     ip->sin_family = AF_INET;
-    memcpy(&ip->sin_addr, addr_list[0], sizeof(ip->sin_addr));
+    memcpy(&ip->sin_addr, &((struct sockaddr_in *)(res->ai_addr))->sin_addr, sizeof(ip->sin_addr));
+    freeaddrinfo(res);
     return ESP_OK;
 }
 
@@ -77,6 +79,7 @@ static int tcp_connect(esp_transport_handle_t t, const char *host, int port, int
     esp_transport_utils_ms_to_timeval(timeout_ms, &tv);
 
     setsockopt(tcp->sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(tcp->sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     ESP_LOGD(TAG, "[sock=%d],connecting to server IP:%s,Port:%d...",
              tcp->sock, ipaddr_ntoa((const ip_addr_t*)&remote_ip.sin_addr.s_addr), port);
@@ -115,23 +118,47 @@ static int tcp_read(esp_transport_handle_t t, char *buffer, int len, int timeout
 static int tcp_poll_read(esp_transport_handle_t t, int timeout_ms)
 {
     transport_tcp_t *tcp = esp_transport_get_context_data(t);
+    int ret = -1;
     fd_set readset;
+    fd_set errset;
     FD_ZERO(&readset);
+    FD_ZERO(&errset);
     FD_SET(tcp->sock, &readset);
+    FD_SET(tcp->sock, &errset);
     struct timeval timeout;
     esp_transport_utils_ms_to_timeval(timeout_ms, &timeout);
-    return select(tcp->sock + 1, &readset, NULL, NULL, &timeout);
+    ret = select(tcp->sock + 1, &readset, NULL, &errset, &timeout);
+    if (ret > 0 && FD_ISSET(tcp->sock, &errset)) {
+        int sock_errno = 0;
+        uint32_t optlen = sizeof(sock_errno);
+        getsockopt(tcp->sock, SOL_SOCKET, SO_ERROR, &sock_errno, &optlen);
+        ESP_LOGE(TAG, "tcp_poll_read select error %d, errno = %s, fd = %d", sock_errno, strerror(sock_errno), tcp->sock);
+        ret = -1;
+    }
+    return ret;
 }
 
 static int tcp_poll_write(esp_transport_handle_t t, int timeout_ms)
 {
     transport_tcp_t *tcp = esp_transport_get_context_data(t);
+    int ret = -1;
     fd_set writeset;
+    fd_set errset;
     FD_ZERO(&writeset);
+    FD_ZERO(&errset);
     FD_SET(tcp->sock, &writeset);
+    FD_SET(tcp->sock, &errset);
     struct timeval timeout;
     esp_transport_utils_ms_to_timeval(timeout_ms, &timeout);
-    return select(tcp->sock + 1, NULL, &writeset, NULL, &timeout);
+    ret = select(tcp->sock + 1, NULL, &writeset, &errset, &timeout);
+    if (ret > 0 && FD_ISSET(tcp->sock, &errset)) {
+        int sock_errno = 0;
+        uint32_t optlen = sizeof(sock_errno);
+        getsockopt(tcp->sock, SOL_SOCKET, SO_ERROR, &sock_errno, &optlen);
+        ESP_LOGE(TAG, "tcp_poll_write select error %d, errno = %s, fd = %d", sock_errno, strerror(sock_errno), tcp->sock);
+        ret = -1;
+    }
+    return ret;
 }
 
 static int tcp_close(esp_transport_handle_t t)

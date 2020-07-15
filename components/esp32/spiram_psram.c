@@ -96,8 +96,6 @@ typedef enum {
 // WARNING: PSRAM shares all but the CS and CLK pins with the flash, so these defines
 // hardcode the flash pins as well, making this code incompatible with either a setup
 // that has the flash on non-standard pins or ESP32s with built-in flash.
-#define FLASH_CLK_IO               6
-#define FLASH_CS_IO                11
 #define PSRAM_SPIQ_SD0_IO          7
 #define PSRAM_SPID_SD1_IO          8
 #define PSRAM_SPIWP_SD3_IO         10
@@ -136,8 +134,8 @@ typedef struct {
 
 #define PSRAM_INTERNAL_IO_28       28
 #define PSRAM_INTERNAL_IO_29       29
-#define PSRAM_IO_MATRIX_DUMMY_40M   1
-#define PSRAM_IO_MATRIX_DUMMY_80M   2
+#define PSRAM_IO_MATRIX_DUMMY_40M  ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_40M
+#define PSRAM_IO_MATRIX_DUMMY_80M  ESP_ROM_SPIFLASH_DUMMY_LEN_PLUS_80M
 
 #define _SPI_CACHE_PORT             0
 #define _SPI_FLASH_PORT             1
@@ -175,7 +173,8 @@ typedef enum {
 
 static psram_cache_mode_t s_psram_mode = PSRAM_CACHE_MAX;
 static psram_clk_mode_t s_clk_mode = PSRAM_CLK_MODE_DCLK;
-static uint32_t s_psram_id = 0;
+static uint64_t s_psram_id = 0;
+static bool s_2t_mode_enabled = false;
 
 /* dummy_len_plus values defined in ROM for SPI flash configuration */
 extern uint8_t g_rom_spiflash_dummy_len_plus[];
@@ -400,11 +399,12 @@ static void psram_disable_qio_mode(psram_spi_num_t spi_num)
 }
 
 //read psram id
-static void psram_read_id(uint32_t* dev_id)
+static void psram_read_id(uint64_t* dev_id)
 {
     psram_spi_num_t spi_num = PSRAM_SPI_1;
     psram_disable_qio_mode(spi_num);
     uint32_t dummy_bits = 0 + extra_dummy;
+    uint32_t psram_id[2] = {0};
     psram_cmd_t ps_cmd;
 
     uint32_t addr = 0;
@@ -428,14 +428,15 @@ static void psram_read_id(uint32_t* dev_id)
     ps_cmd.addr = &addr;
     ps_cmd.txDataBitLen = 0;
     ps_cmd.txData = NULL;
-    ps_cmd.rxDataBitLen = 4 * 8;
-    ps_cmd.rxData = dev_id;
+    ps_cmd.rxDataBitLen = 8 * 8;
+    ps_cmd.rxData = psram_id;
     ps_cmd.dummyBitLen = dummy_bits;
 
     psram_cmd_config(spi_num, &ps_cmd);
     psram_clear_spi_fifo(spi_num);
     psram_cmd_recv_start(spi_num, ps_cmd.rxData, ps_cmd.rxDataBitLen / 8, PSRAM_CMD_SPI);
     psram_cmd_end(spi_num);
+    *dev_id = (uint64_t)(((uint64_t)psram_id[1] << 32) | psram_id[0]);
 }
 
 //enter QPI mode
@@ -469,6 +470,182 @@ static esp_err_t IRAM_ATTR psram_enable_qio_mode(psram_spi_num_t spi_num)
     psram_cmd_end(spi_num);
     return ESP_OK;
 }
+
+#if CONFIG_SPIRAM_2T_MODE
+// use SPI user mode to write psram
+static void spi_user_psram_write(psram_spi_num_t spi_num, uint32_t address, uint32_t *data_buffer, uint32_t data_len)
+{
+    uint32_t addr = (PSRAM_QUAD_WRITE << 24) | (address & 0x7fffff);
+    psram_cmd_t ps_cmd;
+    ps_cmd.cmdBitLen = 0;
+    ps_cmd.cmd = 0;
+    ps_cmd.addr = &addr;
+    ps_cmd.addrBitLen = 4 * 8;
+    ps_cmd.txDataBitLen = 32 * 8;
+    ps_cmd.txData = NULL;
+    ps_cmd.rxDataBitLen = 0;
+    ps_cmd.rxData = NULL;
+    ps_cmd.dummyBitLen = 0;
+
+    for(uint32_t i=0; i<data_len; i+=32) {
+        psram_clear_spi_fifo(spi_num);
+        addr = (PSRAM_QUAD_WRITE << 24) | ((address & 0x7fffff) + i);
+        ps_cmd.txData = data_buffer + (i / 4);
+        psram_cmd_config(spi_num, &ps_cmd);
+        psram_cmd_recv_start(spi_num, ps_cmd.rxData, ps_cmd.rxDataBitLen / 8, PSRAM_CMD_QPI);
+    }
+    psram_cmd_end(spi_num);
+}
+
+// use SPI user mode to read psram
+static void spi_user_psram_read(psram_spi_num_t spi_num, uint32_t address, uint32_t *data_buffer, uint32_t data_len)
+{
+    uint32_t addr = (PSRAM_FAST_READ_QUAD << 24) | (address & 0x7fffff);
+    uint32_t dummy_bits = PSRAM_FAST_READ_QUAD_DUMMY + 1;
+    psram_cmd_t ps_cmd;
+    ps_cmd.cmdBitLen = 0;
+    ps_cmd.cmd = 0;
+    ps_cmd.addr = &addr;
+    ps_cmd.addrBitLen = 4 * 8;
+    ps_cmd.txDataBitLen = 0;
+    ps_cmd.txData = NULL;
+    ps_cmd.rxDataBitLen = 32 * 8;
+    ps_cmd.dummyBitLen = dummy_bits + extra_dummy;
+
+    for(uint32_t i=0; i<data_len; i+=32) {
+        psram_clear_spi_fifo(spi_num);
+        addr = (PSRAM_FAST_READ_QUAD << 24) | ((address & 0x7fffff) + i);
+        ps_cmd.rxData = data_buffer + (i / 4);
+        psram_cmd_config(spi_num, &ps_cmd);
+        psram_cmd_recv_start(spi_num, ps_cmd.rxData, ps_cmd.rxDataBitLen / 8, PSRAM_CMD_QPI);
+    }
+    psram_cmd_end(spi_num);
+}
+
+//enable psram 2T mode
+static esp_err_t IRAM_ATTR psram_2t_mode_enable(psram_spi_num_t spi_num)
+{
+    psram_disable_qio_mode(spi_num);
+    // configure psram clock as 5 MHz
+    uint32_t div = rtc_clk_apb_freq_get() / 5000000;
+    esp_rom_spiflash_config_clk(div, spi_num);
+
+    psram_cmd_t ps_cmd;
+
+    // setp1: send cmd 0x5e
+    //        send one more bit clock after send cmd
+    ps_cmd.cmd = 0x5e;
+    ps_cmd.cmdBitLen = 8;
+    ps_cmd.addrBitLen = 0;
+    ps_cmd.addr = 0;
+    ps_cmd.txDataBitLen = 0;
+    ps_cmd.txData = NULL;
+    ps_cmd.rxDataBitLen =0;
+    ps_cmd.rxData = NULL;
+    ps_cmd.dummyBitLen = 1;
+    psram_cmd_config(spi_num, &ps_cmd);
+    psram_clear_spi_fifo(spi_num);
+    psram_cmd_recv_start(spi_num, NULL, 0, PSRAM_CMD_SPI);
+    psram_cmd_end(spi_num);
+
+    // setp2: send cmd 0x5f
+    //        send one more bit clock after send cmd
+    ps_cmd.cmd = 0x5f;
+    psram_cmd_config(spi_num, &ps_cmd);
+    psram_clear_spi_fifo(spi_num);
+    psram_cmd_recv_start(spi_num, NULL, 0, PSRAM_CMD_SPI);
+    psram_cmd_end(spi_num);
+
+    // setp3: keep cs as high level
+    //        send 128 cycles clock
+    //        send 1 bit high levle in ninth clock from the back to PSRAM SIO1
+    GPIO_OUTPUT_SET(D0WD_PSRAM_CS_IO, 1);
+    gpio_matrix_out(D0WD_PSRAM_CS_IO, SIG_GPIO_OUT_IDX, 0, 0);
+
+    gpio_matrix_out(PSRAM_SPID_SD1_IO, SPIQ_OUT_IDX, 0, 0);
+    gpio_matrix_in(PSRAM_SPID_SD1_IO, SPIQ_IN_IDX, 0);
+    gpio_matrix_out(PSRAM_SPIQ_SD0_IO, SPID_OUT_IDX, 0, 0);
+    gpio_matrix_in(PSRAM_SPIQ_SD0_IO, SPID_IN_IDX, 0);
+
+    uint32_t w_data_2t[4] = {0x0, 0x0, 0x0, 0x00010000};
+
+    ps_cmd.cmd = 0;
+    ps_cmd.cmdBitLen = 0;
+    ps_cmd.txDataBitLen = 128;
+    ps_cmd.txData = w_data_2t;
+    ps_cmd.dummyBitLen = 0;
+    psram_clear_spi_fifo(spi_num);
+    psram_cmd_config(spi_num, &ps_cmd);
+    psram_cmd_recv_start(spi_num, NULL, 0, PSRAM_CMD_SPI);
+    psram_cmd_end(spi_num);
+
+    gpio_matrix_out(PSRAM_SPIQ_SD0_IO, SPIQ_OUT_IDX, 0, 0);
+    gpio_matrix_in(PSRAM_SPIQ_SD0_IO, SPIQ_IN_IDX, 0);
+    gpio_matrix_out(PSRAM_SPID_SD1_IO, SPID_OUT_IDX, 0, 0);
+    gpio_matrix_in(PSRAM_SPID_SD1_IO, SPID_IN_IDX, 0);
+
+    gpio_matrix_out(D0WD_PSRAM_CS_IO, SPICS1_OUT_IDX, 0, 0);
+
+    // setp4: send cmd 0x5f
+    //        send one more bit clock after send cmd
+    ps_cmd.cmd = 0x5f;
+    ps_cmd.cmdBitLen = 8;
+    ps_cmd.txDataBitLen = 0;
+    ps_cmd.txData = NULL;
+    ps_cmd.dummyBitLen = 1;
+    psram_cmd_config(spi_num, &ps_cmd);
+    psram_clear_spi_fifo(spi_num);
+    psram_cmd_recv_start(spi_num, NULL, 0, PSRAM_CMD_SPI);
+    psram_cmd_end(spi_num);
+
+    // configure psram clock back to the default value
+    switch (s_psram_mode) {
+        case PSRAM_CACHE_F80M_S40M:
+        case PSRAM_CACHE_F40M_S40M:
+            esp_rom_spiflash_config_clk(_SPI_40M_CLK_DIV, spi_num);
+            break;
+        case PSRAM_CACHE_F80M_S80M:
+            esp_rom_spiflash_config_clk(_SPI_80M_CLK_DIV, spi_num);
+            break;
+        default:
+            break;
+    }
+    psram_enable_qio_mode(spi_num);
+    return ESP_OK;
+}
+
+#define CHECK_DATA_LEN   (1024)
+#define CHECK_ADDR_STEP  (0x100000)
+#define SIZE_32MBIT      (0x400000)
+#define SIZE_64MBIT      (0x800000)
+
+static esp_err_t psram_2t_mode_check(psram_spi_num_t spi_num)
+{
+    uint8_t w_check_data[CHECK_DATA_LEN] = {0};
+    uint8_t r_check_data[CHECK_DATA_LEN] = {0};
+
+    for (uint32_t addr=0; addr<SIZE_32MBIT; addr+=CHECK_ADDR_STEP) {
+        spi_user_psram_write(spi_num, addr, (uint32_t *)w_check_data, CHECK_DATA_LEN);
+    }
+
+    memset(w_check_data, 0xff, sizeof(w_check_data));
+
+    for (uint32_t addr=SIZE_32MBIT; addr<SIZE_64MBIT; addr+=CHECK_ADDR_STEP) {
+        spi_user_psram_write(spi_num, addr, (uint32_t *)w_check_data, CHECK_DATA_LEN);
+    }
+
+    for (uint32_t addr=0; addr<SIZE_32MBIT; addr+=CHECK_ADDR_STEP) {
+        spi_user_psram_read(spi_num, addr, (uint32_t *)r_check_data, CHECK_DATA_LEN);
+        for (uint32_t j=0; j<CHECK_DATA_LEN; j++) {
+            if (r_check_data[j] != 0xff) {
+                return ESP_FAIL;
+            }
+        }
+    }
+
+    return ESP_OK;
+}
+#endif
 
 void psram_set_cs_timing(psram_spi_num_t spi_num, psram_clk_mode_t clk_mode)
 {
@@ -511,6 +688,7 @@ static void IRAM_ATTR psram_gpio_config(psram_io_t *psram_io, psram_cache_mode_t
         spi_cache_dummy = SPI0_R_QIO_DUMMY_CYCLELEN;
     } else if (rd_mode_reg & SPI_FREAD_DIO_M) {
         spi_cache_dummy = SPI0_R_DIO_DUMMY_CYCLELEN;
+        SET_PERI_REG_BITS(SPI_USER1_REG(0), SPI_USR_ADDR_BITLEN_V, SPI0_R_DIO_ADDR_BITSLEN, SPI_USR_ADDR_BITLEN_S);
     }  else if (rd_mode_reg & (SPI_FREAD_QUAD_M | SPI_FREAD_DUAL_M)) {
         spi_cache_dummy = SPI0_R_FAST_DUMMY_CYCLELEN;
     } else {
@@ -570,7 +748,7 @@ static void IRAM_ATTR psram_gpio_config(psram_io_t *psram_io, psram_cache_mode_t
     gpio_matrix_in(psram_io->psram_spihd_sd2_io, SPIHD_IN_IDX, 0);
     
     //select pin function gpio
-    if ((psram_io->flash_clk_io == FLASH_CLK_IO) && (psram_io->flash_clk_io != psram_io->psram_clk_io)) {
+    if ((psram_io->flash_clk_io == SPI_IOMUX_PIN_NUM_CLK) && (psram_io->flash_clk_io != psram_io->psram_clk_io)) {
         //flash clock signal should come from IO MUX.
         PIN_FUNC_SELECT(GPIO_PIN_MUX_REG[psram_io->flash_clk_io], FUNC_SD_CLK_SPICLK);
     } else {
@@ -602,7 +780,7 @@ static void IRAM_ATTR psram_gpio_config(psram_io_t *psram_io, psram_cache_mode_t
 psram_size_t psram_get_size()
 {
     if ((PSRAM_SIZE_ID(s_psram_id) == PSRAM_EID_SIZE_64MBITS) || PSRAM_IS_64MBIT_TRIAL(s_psram_id)) {
-        return PSRAM_SIZE_64MBITS;
+        return s_2t_mode_enabled ? PSRAM_SIZE_32MBITS : PSRAM_SIZE_64MBITS;
     } else if (PSRAM_SIZE_ID(s_psram_id) == PSRAM_EID_SIZE_32MBITS) {
         return PSRAM_SIZE_32MBITS;
     } else if (PSRAM_SIZE_ID(s_psram_id) == PSRAM_EID_SIZE_16MBITS) {
@@ -610,6 +788,12 @@ psram_size_t psram_get_size()
     } else {
         return PSRAM_SIZE_MAX;
     }
+}
+
+//used in UT only
+bool psram_is_32mbit_ver0(void)
+{
+    return PSRAM_IS_32MBIT_VER0(s_psram_id);
 }
 
 /*
@@ -651,8 +835,8 @@ esp_err_t IRAM_ATTR psram_enable(psram_cache_mode_t mode, psram_vaddr_mode_t vad
 
     const uint32_t spiconfig = ets_efuse_get_spiconfig();
     if (spiconfig == EFUSE_SPICONFIG_SPI_DEFAULTS) {
-        psram_io.flash_clk_io       = FLASH_CLK_IO;
-        psram_io.flash_cs_io        = FLASH_CS_IO;
+        psram_io.flash_clk_io       = SPI_IOMUX_PIN_NUM_CLK;
+        psram_io.flash_cs_io        = SPI_IOMUX_PIN_NUM_CS;
         psram_io.psram_spiq_sd0_io  = PSRAM_SPIQ_SD0_IO;
         psram_io.psram_spid_sd1_io  = PSRAM_SPID_SD1_IO;
         psram_io.psram_spiwp_sd3_io = PSRAM_SPIWP_SD3_IO;
@@ -722,9 +906,13 @@ esp_err_t IRAM_ATTR psram_enable(psram_cache_mode_t mode, psram_vaddr_mode_t vad
         return ESP_FAIL;
     }
 
-    if (PSRAM_IS_32MBIT_VER0(s_psram_id)) {
+    if (psram_is_32mbit_ver0()) {
         s_clk_mode = PSRAM_CLK_MODE_DCLK;
         if (mode == PSRAM_CACHE_F80M_S80M) {
+#ifdef CONFIG_SPIRAM_OCCUPY_NO_HOST
+            ESP_EARLY_LOGE(TAG, "This version of PSRAM needs to claim an extra SPI peripheral at 80MHz. Please either: choose lower frequency by SPIRAM_SPEED_, or select one SPI peripheral it by SPIRAM_OCCUPY_*SPI_HOST in the menuconfig.");
+            abort();
+#else
             /*   note: If the third mode(80Mhz+80Mhz) is enabled for 32MBit 1V8 psram, one of HSPI/VSPI port will be
                  occupied by the system (according to kconfig).
                  Application code should never touch HSPI/VSPI hardware in this case.  We try to stop applications
@@ -748,6 +936,7 @@ esp_err_t IRAM_ATTR psram_enable(psram_cache_mode_t mode, psram_vaddr_mode_t vad
                     break;
                 }
             }
+#endif
         }
     } else {
         // For other psram, we don't need any extra clock cycles after cs get back to high level
@@ -761,6 +950,27 @@ esp_err_t IRAM_ATTR psram_enable(psram_cache_mode_t mode, psram_vaddr_mode_t vad
     psram_set_cs_timing(PSRAM_SPI_1, s_clk_mode);
     psram_set_cs_timing(_SPI_CACHE_PORT, s_clk_mode);
     psram_enable_qio_mode(PSRAM_SPI_1);
+
+    if(((PSRAM_SIZE_ID(s_psram_id) == PSRAM_EID_SIZE_64MBITS) || PSRAM_IS_64MBIT_TRIAL(s_psram_id))) {
+#if CONFIG_SPIRAM_2T_MODE
+#if CONFIG_SPIRAM_BANKSWITCH_ENABLE
+        ESP_EARLY_LOGE(TAG, "PSRAM 2T mode and SPIRAM bank switching can not enabled meanwhile. Please read the help text for SPIRAM_2T_MODE in the project configuration menu.");
+        abort();
+#endif
+        /* Note: 2T mode command should not be sent twice, 
+           otherwise psram would get back to normal mode. */
+        if (psram_2t_mode_check(PSRAM_SPI_1) != ESP_OK) {
+            psram_2t_mode_enable(PSRAM_SPI_1);
+            if (psram_2t_mode_check(PSRAM_SPI_1) != ESP_OK) {
+                ESP_EARLY_LOGE(TAG, "PSRAM 2T mode enable fail!");
+                return ESP_FAIL;
+            }
+        }
+        s_2t_mode_enabled = true;
+        ESP_EARLY_LOGI(TAG, "PSRAM is in 2T mode");
+#endif
+    }
+
     psram_cache_init(mode, vaddrmode);
     return ESP_OK;
 }

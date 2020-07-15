@@ -1493,7 +1493,7 @@ tGATT_STATUS gatt_send_error_rsp (tGATT_TCB *p_tcb, UINT8 err_code, UINT8 op_cod
     return status;
 }
 
-#if (SDP_INCLUDED == TRUE)
+#if (SDP_INCLUDED == TRUE && CLASSIC_BT_GATT_INCLUDED == TRUE)
 /*******************************************************************************
 **
 ** Function         gatt_add_sdp_record
@@ -1559,7 +1559,7 @@ UINT32 gatt_add_sdp_record (tBT_UUID *p_uuid, UINT16 start_hdl, UINT16 end_hdl)
 
     return (sdp_handle);
 }
-#endif  ///SDP_INCLUDED == TRUE
+#endif  ///SDP_INCLUDED == TRUE && CLASSIC_BT_GATT_INCLUDED == TRUE
 
 #if GATT_CONFORMANCE_TESTING == TRUE
 /*******************************************************************************
@@ -1887,7 +1887,7 @@ void gatt_sr_reset_prep_cnt(tGATT_TCB *p_tcb )
 **
 ** Function         gatt_sr_update_cback_cnt
 **
-** Description    Update the teh applicaiton callback count
+** Description    Update the teh application callback count
 **
 ** Returns           None
 **
@@ -1977,7 +1977,7 @@ BOOLEAN gatt_cancel_open(tGATT_IF gatt_if, BD_ADDR bda)
 **
 ** Function         gatt_find_app_hold_link
 **
-** Description      find the applicaiton that is holding the specified link
+** Description      find the application that is holding the specified link
 **
 ** Returns         Boolean
 **
@@ -2002,7 +2002,7 @@ BOOLEAN gatt_find_app_hold_link(tGATT_TCB *p_tcb, UINT8 start_idx, UINT8 *p_foun
 **
 ** Function         gatt_find_specific_app_in_hold_link
 **
-** Description      find the specific applicaiton that is holding the specified link
+** Description      find the specific application that is holding the specified link
 **
 ** Returns         Boolean
 **
@@ -2325,7 +2325,7 @@ void gatt_dbg_display_uuid(tBT_UUID bt_uuid)
                 bt_uuid.uu.uuid128[3], bt_uuid.uu.uuid128[2],
                 bt_uuid.uu.uuid128[1], bt_uuid.uu.uuid128[0]);
     } else {
-        BCM_STRNCPY_S(str_buf, sizeof(str_buf), "Unknown UUID 0", 15);
+        BCM_STRNCPY_S(str_buf, "Unknown UUID 0", 15);
     }
 
     GATT_TRACE_DEBUG ("UUID=[%s]", str_buf);

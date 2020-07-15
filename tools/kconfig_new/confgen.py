@@ -30,7 +30,12 @@ import json
 import re
 
 import gen_kconfig_doc
-import kconfiglib
+
+try:
+    from . import kconfiglib
+except Exception:
+    sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+    import kconfiglib
 
 __version__ = "0.1"
 
@@ -153,6 +158,8 @@ def write_cmake(config, filename):
             if sym._write_to_conf:
                 if sym.orig_type in (kconfiglib.BOOL, kconfiglib.TRISTATE) and val == "n":
                     val = ""  # write unset values as empty variables
+                elif sym.orig_type == kconfiglib.STRING:
+                    val = kconfiglib.escape(val)
                 write("set({}{} \"{}\")\n".format(
                     prefix, sym.name, val))
         config.walk_menu(write_node)

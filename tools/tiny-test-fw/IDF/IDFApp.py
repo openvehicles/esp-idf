@@ -15,9 +15,10 @@
 """ IDF Test Applications """
 import subprocess
 
-import os
-import json
 import App
+import json
+import os
+import sys
 
 
 class IDFApp(App.BaseApp):
@@ -33,6 +34,7 @@ class IDFApp(App.BaseApp):
         super(IDFApp, self).__init__(app_path)
         self.idf_path = self.get_sdk_path()
         self.binary_path = self.get_binary_path(app_path)
+        self.elf_file = self._get_elf_file_path(self.binary_path)
         assert os.path.exists(self.binary_path)
         if self.IDF_DOWNLOAD_CONFIG_FILE not in os.listdir(self.binary_path):
             if self.IDF_FLASH_ARGS_FILE not in os.listdir(self.binary_path):
@@ -94,6 +96,15 @@ class IDFApp(App.BaseApp):
         """
         pass
 
+    @staticmethod
+    def _get_elf_file_path(binary_path):
+        ret = ""
+        file_names = os.listdir(binary_path)
+        for fn in file_names:
+            if os.path.splitext(fn)[1] == ".elf":
+                ret = os.path.join(binary_path, fn)
+        return ret
+
     def _parse_flash_download_config(self):
         """
         Parse flash download config from build metadata files
@@ -144,20 +155,36 @@ class IDFApp(App.BaseApp):
                                       "gen_esp32part.py")
         assert os.path.exists(partition_tool)
 
-        for (_, path) in self.flash_files:
-            if "partition" in path:
+        errors = []
+        # self.flash_files is sorted based on offset in order to have a consistent result with different versions of
+        # Python
+        for (_, path) in sorted(self.flash_files, key=lambda elem: elem[0]):
+            if 'partition' in os.path.split(path)[1]:
                 partition_file = os.path.join(self.binary_path, path)
+
+                process = subprocess.Popen([sys.executable, partition_tool, partition_file],
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                (raw_data, raw_error) = process.communicate()
+                if isinstance(raw_error, bytes):
+                    raw_error = raw_error.decode()
+                if 'Traceback' in raw_error:
+                    # Some exception occured. It is possible that we've tried the wrong binary file.
+                    errors.append((path, raw_error))
+                    continue
+
+                if isinstance(raw_data, bytes):
+                    raw_data = raw_data.decode()
                 break
         else:
-            raise ValueError("No partition table found for IDF binary path: {}".format(self.binary_path))
+            traceback_msg = os.linesep.join(['{} {}:{}{}'.format(partition_tool,
+                                                                 p,
+                                                                 os.linesep,
+                                                                 msg) for p, msg in errors])
+            raise ValueError("No partition table found for IDF binary path: {}{}{}".format(self.binary_path,
+                                                                                           os.linesep,
+                                                                                           traceback_msg))
 
-        process = subprocess.Popen(["python", partition_tool, partition_file],
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        raw_data = process.stdout.read()
-        if isinstance(raw_data, bytes):
-            raw_data = raw_data.decode()
         partition_table = dict()
-
         for line in raw_data.splitlines():
             if line[0] != "#":
                 try:

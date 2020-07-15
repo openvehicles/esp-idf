@@ -43,7 +43,7 @@
 #include "esp_task.h"
 #include "esp_system.h"
 #include "sdkconfig.h"
-
+#include "sntp.h"
 #include "netif/dhcp_state.h"
 
 /* Enable all Espressif-only options */
@@ -526,6 +526,13 @@
 #define LWIP_SO_SNDTIMEO                1
 
 /**
+ * LWIP_RANDOMIZE_INITIAL_LOCAL_PORTS==1: randomize the local port for the first
+ * local TCP/UDP pcb (default==0). This can prevent creating predictable port
+ * numbers after booting a device.
+ */
+#define LWIP_RANDOMIZE_INITIAL_LOCAL_PORTS   CONFIG_LWIP_RANDOMIZE_INITIAL_LOCAL_PORTS
+
+/**
  * LWIP_SO_RCVTIMEO==1: Enable receive timeout for sockets/netconns and
  * SO_RCVTIMEO processing.
  */
@@ -537,6 +544,11 @@
  * in seconds. (does not require sockets.c, and will affect tcp.c)
  */
 #define LWIP_TCP_KEEPALIVE              1
+
+/**
+ * LWIP_SO_LINGER==1: Enable SO_LINGER processing.
+ */
+#define LWIP_SO_LINGER                  CONFIG_LWIP_SO_LINGER
 
 /**
  * LWIP_SO_RCVBUF==1: Enable SO_RCVBUF processing.
@@ -653,6 +665,13 @@
  */
 #define LWIP_IPV6                       1
 
+/**
+ * LWIP_ND6_RDNSS_MAX_DNS_SERVERS: Allow IPv6 DNS servers to be retrieved from
+ * NDP, up to the maximum number of allowed DNS servers (minus fallback slot)
+ */
+#define LWIP_ND6_RDNSS_MAX_DNS_SERVERS  0
+
+
 /*
    ---------------------------------------
    ---------- Hook options ---------------
@@ -731,6 +750,17 @@
  */
 #define ETHARP_TRUST_IP_MAC             CONFIG_LWIP_ETHARP_TRUST_IP_MAC
 
+/**
+ * ETHARP_SUPPORT_VLAN==1: support receiving and sending ethernet packets with
+ * VLAN header. See the description of LWIP_HOOK_VLAN_CHECK and
+ * LWIP_HOOK_VLAN_SET hooks to check/set VLAN headers.
+ * Additionally, you can define ETHARP_VLAN_CHECK to an u16_t VLAN ID to check.
+ * If ETHARP_VLAN_CHECK is defined, only VLAN-traffic for this VLAN is accepted.
+ * If ETHARP_VLAN_CHECK is not defined, all traffic is accepted.
+ * Alternatively, define a function/define ETHARP_VLAN_CHECK_FN(eth_hdr, vlan)
+ * that returns 1 to accept a packet or 0 to drop a packet.
+ */
+#define ETHARP_SUPPORT_VLAN             CONFIG_ETHARP_SUPPORT_VLAN
 
 /**
  * POSIX I/O functions are mapped to LWIP via the VFS layer
@@ -752,14 +782,13 @@
 
 #define ESP_LWIP                        1
 #define ESP_LWIP_ARP                    1
+#define ESP_IPV6                        1
 #define ESP_PER_SOC_TCP_WND             0
 #define ESP_THREAD_SAFE                 1
 #define ESP_THREAD_SAFE_DEBUG           LWIP_DBG_OFF
 #define ESP_DHCP                        1
 #define ESP_DNS                         1
-#define ESP_IPV6_AUTOCONFIG             1
 #define ESP_PERF                        0
-#define ESP_RANDOM_TCP_PORT             1
 #define ESP_IP4_ATON                    1
 #define ESP_LIGHT_SLEEP                 1
 #define ESP_L2_TO_L3_COPY               CONFIG_L2_TO_L3_COPY
@@ -773,6 +802,10 @@
 #define ESP_HAS_SELECT                  1
 #define ESP_AUTO_RECV                   1
 #define ESP_GRATUITOUS_ARP              CONFIG_ESP_GRATUITOUS_ARP
+
+#ifdef CONFIG_LWIP_IPV6_AUTOCONFIG
+#define ESP_IPV6_AUTOCONFIG             CONFIG_LWIP_IPV6_AUTOCONFIG
+#endif
 
 #ifdef ESP_IRAM_ATTR
 #undef ESP_IRAM_ATTR
@@ -833,10 +866,20 @@ enum {
 #define LWIP_DHCP_MAX_NTP_SERVERS       CONFIG_LWIP_DHCP_MAX_NTP_SERVERS
 #define LWIP_TIMEVAL_PRIVATE            0
 
+/*
+   --------------------------------------
+   ------------ SNTP options ------------
+   --------------------------------------
+*/
+/*
+ * SNTP update delay - in milliseconds
+ */
+#define SNTP_UPDATE_DELAY              CONFIG_LWIP_SNTP_UPDATE_DELAY
+
 #define SNTP_SET_SYSTEM_TIME_US(sec, us)  \
     do { \
         struct timeval tv = { .tv_sec = sec, .tv_usec = us }; \
-        settimeofday(&tv, NULL); \
+        sntp_sync_time(&tv); \
     } while (0);
 
 #define SNTP_GET_SYSTEM_TIME(sec, us) \
@@ -845,6 +888,7 @@ enum {
         gettimeofday(&tv, NULL); \
         (sec) = tv.tv_sec;  \
         (us) = tv.tv_usec; \
+        sntp_set_sync_status(SNTP_SYNC_STATUS_RESET); \
     } while (0);
 
 #define SOC_SEND_LOG //printf
