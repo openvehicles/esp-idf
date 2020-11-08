@@ -18,6 +18,7 @@
 #include "btc/btc_manage.h"
 #include "mesh_byteorder.h"
 #include "mesh_main.h"
+#include "fast_prov.h"
 #include "provisioner_prov.h"
 #include "esp_ble_mesh_defs.h"
 
@@ -298,6 +299,12 @@ esp_ble_mesh_node_t *btc_ble_mesh_provisioner_get_node_with_uuid(const uint8_t u
 
 esp_ble_mesh_node_t *btc_ble_mesh_provisioner_get_node_with_addr(uint16_t unicast_addr);
 
+esp_ble_mesh_node_t *btc_ble_mesh_provisioner_get_node_with_name(const char *name);
+
+u16_t btc_ble_mesh_provisioner_get_prov_node_count(void);
+
+const esp_ble_mesh_node_t **btc_ble_mesh_provisioner_get_node_table_entry(void);
+
 int btc_ble_mesh_client_model_init(esp_ble_mesh_model_t *model);
 
 int btc_ble_mesh_client_model_deinit(esp_ble_mesh_model_t *model);
@@ -313,14 +320,11 @@ esp_ble_mesh_elem_t *btc_ble_mesh_elem_find(u16_t addr);
 uint8_t btc_ble_mesh_elem_count(void);
 
 esp_ble_mesh_model_t *btc_ble_mesh_model_find_vnd(const esp_ble_mesh_elem_t *elem,
-        uint16_t company, uint16_t id);
+                                                  uint16_t company, uint16_t id);
 
-esp_ble_mesh_model_t *btc_ble_mesh_model_find(const esp_ble_mesh_elem_t *elem,
-        uint16_t id);
+esp_ble_mesh_model_t *btc_ble_mesh_model_find(const esp_ble_mesh_elem_t *elem, uint16_t id);
 
 const esp_ble_mesh_comp_t *btc_ble_mesh_comp_get(void);
-
-u16_t btc_ble_mesh_provisioner_get_prov_node_count(void);
 
 void btc_ble_mesh_model_call_handler(btc_msg_t *msg);
 void btc_ble_mesh_model_cb_handler(btc_msg_t *msg);

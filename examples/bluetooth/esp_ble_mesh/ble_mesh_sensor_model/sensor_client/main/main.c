@@ -22,6 +22,8 @@
 #include "ble_mesh_example_init.h"
 #include "board.h"
 
+#define TAG "EXAMPLE"
+
 #define CID_ESP             0x02E5
 
 #define PROV_OWN_ADDR       0x0001
@@ -561,10 +563,11 @@ static void example_ble_mesh_sensor_client_cb(esp_ble_mesh_sensor_client_cb_even
                     if (data_len != ESP_BLE_MESH_SENSOR_DATA_ZERO_LEN) {
                         ESP_LOG_BUFFER_HEX("Sensor Data", data + mpid_len, data_len + 1);
                         length += mpid_len + data_len + 1;
+                        data += mpid_len + data_len + 1;
                     } else {
                         length += mpid_len;
+                        data += mpid_len;
                     }
-                    data += length;
                 }
             }
             break;

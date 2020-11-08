@@ -177,7 +177,7 @@ static void set_isr_wrapper(int32_t n, void *f, void *arg)
 static void * spin_lock_create_wrapper(void)
 {
     portMUX_TYPE tmp = portMUX_INITIALIZER_UNLOCKED;
-    void *mux = malloc(sizeof(portMUX_TYPE));
+    void *mux = heap_caps_malloc(sizeof(portMUX_TYPE), MALLOC_CAP_8BIT|MALLOC_CAP_INTERNAL);
 
     if (mux) {
         memcpy(mux,&tmp,sizeof(portMUX_TYPE));
@@ -555,7 +555,7 @@ wifi_osi_funcs_t g_wifi_osi_funcs = {
     ._task_get_max_priority = task_get_max_priority_wrapper,
     ._malloc = malloc,
     ._free = free,
-    ._get_free_heap_size = esp_get_free_heap_size,
+    ._get_free_heap_size = esp_get_free_internal_heap_size,
     ._rand = esp_random,
     ._dport_access_stall_other_cpu_start_wrap = esp_dport_access_stall_other_cpu_start_wrap,
     ._dport_access_stall_other_cpu_end_wrap = esp_dport_access_stall_other_cpu_end_wrap,

@@ -19,6 +19,7 @@
 #include "cfg_srv.h"
 #include "mesh_common.h"
 #include "settings_nvs.h"
+#include "settings.h"
 #include "provisioner_main.h"
 #include "provisioner_prov.h"
 
@@ -64,6 +65,7 @@ static struct key_update {
 } key_updates[CONFIG_BLE_MESH_APP_KEY_COUNT + CONFIG_BLE_MESH_SUBNET_COUNT];
 
 static struct k_delayed_work pending_store;
+static void store_pending(struct k_work *work);
 
 /* Mesh network storage information */
 struct net_val {
@@ -167,7 +169,29 @@ struct node_info {
     u8_t  dev_key[16];
 } __packed;
 
-#define DEVICE_ROLE_BITS    (BIT(BLE_MESH_NODE) | BIT(BLE_MESH_PROVISIONER))
+static bt_mesh_mutex_t settings_lock;
+
+static void bt_mesh_settings_mutex_new(void)
+{
+    if (settings_lock.mutex == NULL) {
+        bt_mesh_mutex_create(&settings_lock);
+    }
+}
+
+static void bt_mesh_settings_mutex_free(void)
+{
+    bt_mesh_mutex_free(&settings_lock);
+}
+
+void bt_mesh_settings_lock(void)
+{
+    bt_mesh_mutex_lock(&settings_lock);
+}
+
+void bt_mesh_settings_unlock(void)
+{
+    bt_mesh_mutex_unlock(&settings_lock);
+}
 
 static int role_set(const char *name)
 {
@@ -249,7 +273,7 @@ static int iv_set(const char *name)
     bt_mesh_atomic_set_bit_to(bt_mesh.flags, BLE_MESH_IVU_IN_PROGRESS, iv.iv_update);
     bt_mesh.ivu_duration = iv.iv_duration;
 
-    BT_INFO("Restored IV Index 0x%04x (IV Update Flag %u) duration %u hours",
+    BT_INFO("Restored IV Index 0x%08x (IV Update Flag %u) duration %u hours",
            iv.iv_index, iv.iv_update, iv.iv_duration);
 
     return 0;
@@ -340,13 +364,18 @@ static int rpl_set(const char *name)
 
     for (i = 0; i < length / SETTINGS_ITEM_SIZE; i++) {
         u16_t src = net_buf_simple_pull_le16(buf);
+
+        if (!BLE_MESH_ADDR_IS_UNICAST(src)) {
+            BT_ERR("Invalid source address 0x%04x", src);
+            continue;
+        }
+
         sprintf(get, "mesh/rpl/%04x", src);
 
         err = bt_mesh_load_core_settings(get, (u8_t *)&rpl, sizeof(rpl), &exist);
         if (err) {
             BT_ERR("Failed to load RPL entry 0x%04x", src);
-            bt_mesh_rpl_reset();
-            goto free;
+            continue;
         }
 
         if (exist == false) {
@@ -357,16 +386,17 @@ static int rpl_set(const char *name)
         if (!entry) {
             entry = rpl_alloc(src);
             if (!entry) {
-                BT_ERR("%s, No space for a new RPL 0x%04x", __func__, src);
+                BT_ERR("No space for a new RPL 0x%04x", src);
                 err = -ENOMEM;
                 goto free;
             }
         }
 
-        BT_INFO("Restored RPL entry 0x%04x: seq 0x%06x, old_iv %u", src, rpl.seq, rpl.old_iv);
         entry->src = src;
         entry->seq = rpl.seq;
         entry->old_iv = rpl.old_iv;
+
+        BT_INFO("Restored RPL entry 0x%04x: seq 0x%06x, old_iv %u", src, rpl.seq, rpl.old_iv);
     }
 
 free:
@@ -414,8 +444,8 @@ static int net_key_set(const char *name)
 
         err = bt_mesh_load_core_settings(get, (u8_t *)&key, sizeof(key), &exist);
         if (err) {
-            BT_ERR("%s, Failed to load NetKey 0x%03x", __func__, net_idx);
-            goto free;
+            BT_ERR("Failed to load NetKey 0x%03x", net_idx);
+            continue;
         }
 
         if (exist == false) {
@@ -426,7 +456,7 @@ static int net_key_set(const char *name)
         if (!sub) {
             sub = subnet_alloc(net_idx);
             if (!sub) {
-                BT_ERR("%s, No space for a new subnet 0x%03x", __func__, net_idx);
+                BT_ERR("No space for a new subnet 0x%03x", net_idx);
                 err = -ENOMEM;
                 goto free;
             }
@@ -438,7 +468,7 @@ static int net_key_set(const char *name)
         memcpy(sub->keys[0].net, &key.val[0], 16);
         memcpy(sub->keys[1].net, &key.val[1], 16);
 
-        BT_INFO("Restored NetKey Index 0x%03x", sub->net_idx);
+        BT_INFO("Restored NetKeyIndex 0x%03x", sub->net_idx);
         BT_INFO("Restored NetKey %s", bt_hex(sub->keys[0].net, 16));
     }
 
@@ -474,8 +504,8 @@ static int app_key_set(const char *name)
 
         err = bt_mesh_load_core_settings(get, (u8_t *)&key, sizeof(key), &exist);
         if (err) {
-            BT_ERR("%s, Failed to load AppKey 0x%03x", __func__, app_idx);
-            goto free;
+            BT_ERR("Failed to load AppKey 0x%03x", app_idx);
+            continue;
         }
 
         if (exist == false) {
@@ -484,16 +514,15 @@ static int app_key_set(const char *name)
 
         sub = bt_mesh_subnet_get(key.net_idx);
         if (!sub) {
-            BT_ERR("%s, Failed to find subnet 0x%03x", __func__, key.net_idx);
-            err = -ENOENT;
-            goto free;
+            BT_ERR("Failed to find subnet 0x%03x", key.net_idx);
+            continue;
         }
 
         app = bt_mesh_app_key_find(app_idx);
         if (!app) {
             app = bt_mesh_app_key_alloc(app_idx);
             if (!app) {
-                BT_ERR("%s, No space for a new app key 0x%03x", __func__, app_idx);
+                BT_ERR("No space for a new appkey 0x%03x", app_idx);
                 err = -ENOMEM;
                 goto free;
             }
@@ -507,7 +536,7 @@ static int app_key_set(const char *name)
         bt_mesh_app_id(app->keys[0].val, &app->keys[0].id);
         bt_mesh_app_id(app->keys[1].val, &app->keys[1].id);
 
-        BT_INFO("Restored AppKey Index 0x%03x, NetKey Index 0x%03x",
+        BT_INFO("Restored AppKeyIndex 0x%03x, NetKeyIndex 0x%03x",
             app->app_idx, app->net_idx);
         BT_INFO("Restored AppKey %s", bt_hex(app->keys[0].val, 16));
     }
@@ -527,7 +556,7 @@ static int hb_pub_set(const char *name)
     BT_DBG("%s", __func__);
 
     if (!hb_pub) {
-        BT_ERR("%s, NULL cfg hb pub", __func__);
+        BT_ERR("Invalid heartbeat publication");
         return -EINVAL;
     }
 
@@ -557,7 +586,8 @@ static int hb_pub_set(const char *name)
         hb_pub->count = 0U;
     }
 
-    BT_INFO("Restored Heartbeat Publication, dst 0x%04x", hb_pub->dst);
+    BT_INFO("Restored Heartbeat Publication, dst 0x%04x, period %d, net_idx 0x%03x",
+            hb_pub->dst, hb_pub->period, hb_pub->net_idx);
 
     return 0;
 }
@@ -572,7 +602,7 @@ static int cfg_set(const char *name)
     BT_DBG("%s", __func__);
 
     if (!cfg) {
-        BT_ERR("%s, NULL cfg", __func__);
+        BT_ERR("Invalid configuration");
         stored_cfg.valid = false;
         return -EINVAL;
     }
@@ -590,7 +620,10 @@ static int cfg_set(const char *name)
 
     memcpy(&stored_cfg.cfg, &val, sizeof(val));
     stored_cfg.valid = true;
-    BT_INFO("Restored Configuration State");
+
+    BT_INFO("Restored Configuration, ttl %d, transmit 0x%02x, retransmit 0x%02x",
+            val.default_ttl, val.net_transmit, val.relay_retransmit);
+
     return 0;
 }
 
@@ -613,6 +646,10 @@ static int model_set_bind(bool vnd, struct bt_mesh_model *model, u16_t model_key
         return -EIO;
     }
 
+    if (exist == true) {
+        BT_INFO("Restored Model Bound AppKey, index %s", bt_hex(model->keys, sizeof(model->keys)));
+    }
+
     return 0;
 }
 
@@ -633,6 +670,10 @@ static int model_set_sub(bool vnd, struct bt_mesh_model *model, u16_t model_key)
     if (err) {
         BT_ERR("Failed to load model subscriptions");
         return -EIO;
+    }
+
+    if (exist == true) {
+        BT_INFO("Restored Model Subscription, address %s", bt_hex(model->groups, sizeof(model->groups)));
     }
 
     return 0;
@@ -662,7 +703,7 @@ static int model_set_pub(bool vnd, struct bt_mesh_model *model, u16_t model_key)
         model->pub->period = 0U;
         model->pub->retransmit = 0U;
         model->pub->count = 0U;
-        return 0;
+        return -EIO;
     }
 
     if (exist == false) {
@@ -677,8 +718,7 @@ static int model_set_pub(bool vnd, struct bt_mesh_model *model, u16_t model_key)
     model->pub->retransmit = pub.retransmit;
     model->pub->count = 0U;
 
-    BT_INFO("Restored Model Publication, address 0x%04x, app_idx 0x%03x",
-           pub.addr, pub.key);
+    BT_INFO("Restored Model Publication, address 0x%04x, app_idx 0x%03x", pub.addr, pub.key);
 
     return 0;
 }
@@ -689,7 +729,6 @@ static int model_set(bool vnd, const char *name)
     struct net_buf_simple *buf = NULL;
     u8_t elem_idx = 0U, model_idx = 0U;
     size_t length = 0U;
-    int err = 0;
     int i;
 
     BT_DBG("%s", __func__);
@@ -703,6 +742,7 @@ static int model_set(bool vnd, const char *name)
 
     for (i = 0; i < length / SETTINGS_ITEM_SIZE; i++) {
         u16_t model_key = net_buf_simple_pull_le16(buf);
+
         elem_idx = BLE_MESH_GET_ELEM_IDX(model_key);
         model_idx = BLE_MESH_GET_MODEL_IDX(model_key);
 
@@ -710,29 +750,16 @@ static int model_set(bool vnd, const char *name)
         if (!model) {
             BT_ERR("%s model not found, elem_idx %u, model_idx %u",
                 vnd ? "vnd" : "sig", elem_idx, model_idx);
-            err = -ENOENT;
-            goto free;
+            continue;
         }
 
-        err = model_set_bind(vnd, model, model_key);
-        if (err) {
-            goto free;
-        }
-
-        err = model_set_sub(vnd, model, model_key);
-        if (err) {
-            goto free;
-        }
-
-        err = model_set_pub(vnd, model, model_key);
-        if (err) {
-            goto free;
-        }
+        model_set_bind(vnd, model, model_key);
+        model_set_sub(vnd, model, model_key);
+        model_set_pub(vnd, model, model_key);
     }
 
-free:
     bt_mesh_free_buf(buf);
-    return err;
+    return 0;
 }
 
 static int sig_mod_set(const char *name)
@@ -773,7 +800,7 @@ static int va_set(const char *name)
         err = bt_mesh_load_core_settings(get, (u8_t *)&va, sizeof(va), &exist);
         if (err) {
             BT_ERR("Failed to load virtual address 0x%04x", index);
-            goto free;
+            continue;
         }
 
         if (exist == false) {
@@ -782,12 +809,12 @@ static int va_set(const char *name)
 
         if (va.ref == 0) {
             BT_DBG("Ignore virtual address %s with ref = 0", get);
-            goto free;
+            continue;
         }
 
         lab = get_label(index);
         if (lab == NULL) {
-            BT_WARN("%s, Out of labels buffers", __func__);
+            BT_WARN("Out of labels buffers");
             err = -ENOBUFS;
             goto free;
         }
@@ -826,7 +853,7 @@ static int p_prov_set(const char *name)
 
     bt_mesh_provisioner_restore_prov_info(val.primary_addr, val.alloc_addr);
 
-    BT_INFO("Restored Primary Address 0x%04x, next address allocation 0x%04x",
+    BT_INFO("Restored Primary Address 0x%04x, next address alloc 0x%04x",
         val.primary_addr, val.alloc_addr);
 
     return 0;
@@ -842,7 +869,7 @@ static int p_net_idx_set(const char *name)
 
     err = bt_mesh_load_core_settings(name, (u8_t *)&net_idx, sizeof(net_idx), &exist);
     if (err) {
-        BT_ERR("Failed to load next net_idx allocation");
+        BT_ERR("Failed to load next NetKeyIndex alloc");
         return 0;
     }
 
@@ -852,7 +879,7 @@ static int p_net_idx_set(const char *name)
 
     bt_mesh.p_net_idx_next = net_idx;
 
-    BT_INFO("Restored next NetKey Index allocation 0x%03x", bt_mesh.p_net_idx_next);
+    BT_INFO("Restored next NetKeyIndex alloc 0x%03x", bt_mesh.p_net_idx_next);
 
     return 0;
 }
@@ -867,7 +894,7 @@ static int p_app_idx_set(const char *name)
 
     err = bt_mesh_load_core_settings(name, (u8_t *)&app_idx, sizeof(app_idx), &exist);
     if (err) {
-        BT_ERR("Failed to load next app_idx allocation");
+        BT_ERR("Failed to load next AppKeyIndex alloc");
         return 0;
     }
 
@@ -877,7 +904,7 @@ static int p_app_idx_set(const char *name)
 
     bt_mesh.p_app_idx_next = app_idx;
 
-    BT_INFO("Restored next AppKey Index allocation 0x%03x", bt_mesh.p_app_idx_next);
+    BT_INFO("Restored next AppKeyIndex alloc 0x%03x", bt_mesh.p_app_idx_next);
 
     return 0;
 }
@@ -890,7 +917,7 @@ static struct bt_mesh_subnet *p_subnet_alloc(void)
         if (bt_mesh.p_sub[i] == NULL) {
             bt_mesh.p_sub[i] = bt_mesh_calloc(sizeof(struct bt_mesh_subnet));
             if (!bt_mesh.p_sub[i]) {
-                BT_ERR("%s, Failed to allocate memory", __func__);
+                BT_ERR("%s, Out of memory", __func__);
                 return NULL;
             }
 
@@ -909,7 +936,7 @@ static struct bt_mesh_app_key *p_appkey_alloc(void)
         if (bt_mesh.p_app_keys[i] == NULL) {
             bt_mesh.p_app_keys[i] = bt_mesh_calloc(sizeof(struct bt_mesh_app_key));
             if (!bt_mesh.p_app_keys[i]) {
-                BT_ERR("%s, Failed to allocate memory", __func__);
+                BT_ERR("%s, Out of memory", __func__);
                 return NULL;
             }
 
@@ -946,8 +973,8 @@ static int p_net_key_set(const char *name)
 
         err = bt_mesh_load_core_settings(get, (u8_t *)&key, sizeof(key), &exist);
         if (err) {
-            BT_ERR("%s, Failed to load NetKey 0x%03x", __func__, net_idx);
-            goto free;
+            BT_ERR("Failed to load NetKey 0x%03x", net_idx);
+            continue;
         }
 
         if (exist == false) {
@@ -958,7 +985,7 @@ static int p_net_key_set(const char *name)
         if (!sub) {
             sub = p_subnet_alloc();
             if (!sub) {
-                BT_ERR("%s, No space for a new subnet 0x%03x", __func__, net_idx);
+                BT_ERR("No space for a new subnet 0x%03x", net_idx);
                 err = -ENOMEM;
                 goto free;
             }
@@ -970,7 +997,7 @@ static int p_net_key_set(const char *name)
         memcpy(sub->keys[0].net, &key.val[0], 16);
         memcpy(sub->keys[1].net, &key.val[1], 16);
 
-        BT_INFO("Restored NetKey Index 0x%03x", sub->net_idx);
+        BT_INFO("Restored NetKeyIndex 0x%03x", sub->net_idx);
         BT_INFO("Restored NetKey %s", bt_hex(sub->keys[0].net, 16));
     }
 
@@ -1006,8 +1033,8 @@ static int p_app_key_set(const char *name)
 
         err = bt_mesh_load_core_settings(get, (u8_t *)&key, sizeof(key), &exist);
         if (err) {
-            BT_ERR("%s, Failed to load AppKey 0x%03x", __func__, app_idx);
-            goto free;
+            BT_ERR("Failed to load AppKey 0x%03x", app_idx);
+            continue;
         }
 
         if (exist == false) {
@@ -1016,16 +1043,15 @@ static int p_app_key_set(const char *name)
 
         sub = bt_mesh_provisioner_subnet_get(key.net_idx);
         if (!sub) {
-            BT_ERR("%s, Failed to find subnet 0x%03x", __func__, key.net_idx);
-            err = -ENOENT;
-            goto free;
+            BT_ERR("Failed to find subnet 0x%03x", key.net_idx);
+            continue;
         }
 
         app = bt_mesh_provisioner_app_key_find(app_idx);
         if (!app) {
             app = p_appkey_alloc();
             if (!app) {
-                BT_ERR("%s, No space for a new app key 0x%03x", __func__, app_idx);
+                BT_ERR("No space for a new appkey 0x%03x", app_idx);
                 err = -ENOMEM;
                 goto free;
             }
@@ -1039,7 +1065,7 @@ static int p_app_key_set(const char *name)
         bt_mesh_app_id(app->keys[0].val, &app->keys[0].id);
         bt_mesh_app_id(app->keys[1].val, &app->keys[1].id);
 
-        BT_INFO("Restored AppKey Index 0x%03x, NetKey Index 0x%03x",
+        BT_INFO("Restored AppKeyIndex 0x%03x, NetKeyIndex 0x%03x",
             app->app_idx, app->net_idx);
         BT_INFO("Restored AppKey %s", bt_hex(app->keys[0].val, 16));
     }
@@ -1158,7 +1184,7 @@ static int p_node_set(const char *name)
     for (i = 0; i < length / SETTINGS_ITEM_SIZE; i++) {
         u16_t addr = net_buf_simple_pull_le16(buf);
         if (!BLE_MESH_ADDR_IS_UNICAST(addr)) {
-            BT_ERR("%s, 0x%04x is not a unicast address", __func__, addr);
+            BT_ERR("Invalid unicast address 0x%04x", addr);
             continue;
         }
 
@@ -1188,43 +1214,44 @@ const struct bt_mesh_setting {
     const char *name;
     int (*func)(const char *name);
 } settings[] = {
-    { "mesh/role",     role_set      },
-    { "mesh/net",      net_set       },
-    { "mesh/iv",       iv_set        },
-    { "mesh/seq",      seq_set       },
-    { "mesh/rpl",      rpl_set       },
-    { "mesh/netkey",   net_key_set   },
-    { "mesh/appkey",   app_key_set   },
-    { "mesh/hb_pub",   hb_pub_set    },
-    { "mesh/cfg",      cfg_set       },
-    { "mesh/sig",      sig_mod_set   },
-    { "mesh/vnd",      vnd_mod_set   },
+    { "mesh/role",     role_set      }, /* For Node & Provisioner */
+    { "mesh/net",      net_set       }, /* For Node */
+    { "mesh/iv",       iv_set        }, /* For Node & Provisioner */
+    { "mesh/seq",      seq_set       }, /* For Node & Provisioner */
+    { "mesh/rpl",      rpl_set       }, /* For Node & Provisioner */
+    { "mesh/netkey",   net_key_set   }, /* For Node */
+    { "mesh/appkey",   app_key_set   }, /* For Node */
+    { "mesh/hb_pub",   hb_pub_set    }, /* For Node */
+    { "mesh/cfg",      cfg_set       }, /* For Node */
+    { "mesh/sig",      sig_mod_set   }, /* For Node & Provisioner */
+    { "mesh/vnd",      vnd_mod_set   }, /* For Node & Provisioner */
 #if CONFIG_BLE_MESH_LABEL_COUNT > 0
-    { "mesh/vaddr",    va_set        },
+    { "mesh/vaddr",    va_set        }, /* For Node */
 #endif
 #if CONFIG_BLE_MESH_PROVISIONER
-    { "mesh/p_prov",   p_prov_set    },
-    { "mesh/p_netidx", p_net_idx_set },
-    { "mesh/p_appidx", p_app_idx_set },
-    { "mesh/p_netkey", p_net_key_set },
-    { "mesh/p_appkey", p_app_key_set },
-    { "mesh/p_node",   p_node_set    },
+    { "mesh/p_prov",   p_prov_set    }, /* For Provisioner */
+    { "mesh/p_netidx", p_net_idx_set }, /* For Provisioner */
+    { "mesh/p_appidx", p_app_idx_set }, /* For Provisioner */
+    { "mesh/p_netkey", p_net_key_set }, /* For Provisioner */
+    { "mesh/p_appkey", p_app_key_set }, /* For Provisioner */
+    { "mesh/p_node",   p_node_set    }, /* For Provisioner */
 #endif
 };
 
 /**
  * For Provisioner, the load operation needs the following actions:
+ * role_set:    Need, restore the device role
  * net_set:     Not needed
- * iv_set:      Need, although Provisioner will do some initialization of IV Index
- *              during startup, but we need to restore the last IV Index status
+ * iv_set:      Need, restore the last IV Index status
  * seq_set:     Need, restore the previous sequence number
  * rpl_set:     Need, restore the previous Replay Protection List
- * net_key_set: Need, restore the previous network keys
- * app_key_set: Need, restore the previous application keys
+ * net_key_set: Not needed
+ * app_key_set: Not needed
  * hb_pub_set:  Not needed currently
  * cfg_set:     Not needed currently
  * sig_mod_set: Need, restore SIG models related info (app, sub, pub)
  * vnd_mod_set: Need, restore vendor models related info (app, sub, pub)
+ * va_set:      Not needed currently
  */
 int settings_core_load(void)
 {
@@ -1237,7 +1264,8 @@ int settings_core_load(void)
             !strcmp(settings[i].name, "mesh/netkey") ||
             !strcmp(settings[i].name, "mesh/appkey") ||
             !strcmp(settings[i].name, "mesh/hb_pub") ||
-            !strcmp(settings[i].name, "mesh/cfg")) &&
+            !strcmp(settings[i].name, "mesh/cfg") ||
+            !strcmp(settings[i].name, "mesh/vaddr")) &&
             (!IS_ENABLED(CONFIG_BLE_MESH_NODE) || bt_mesh_is_provisioner())) {
             BT_DBG("Not restoring %s for Provisioner", settings[i].name);
             continue;
@@ -1257,15 +1285,15 @@ int settings_core_load(void)
         settings[i].func(settings[i].name);
 
         if (!strcmp(settings[i].name, "mesh/role")) {
-            u8_t role = bt_mesh_atomic_get(bt_mesh.flags) & DEVICE_ROLE_BITS;
+            u8_t role = bt_mesh_atomic_get(bt_mesh.flags) & BLE_MESH_SETTINGS_ROLE_BIT_MASK;
             switch (role) {
-            case 0U:
+            case BLE_MESH_SETTINGS_ROLE_NONE:
                 BT_INFO("Mesh device just starts up, no restore");
                 return 0;
-            case BIT(BLE_MESH_NODE):
+            case BLE_MESH_SETTINGS_ROLE_NODE:
                 BT_INFO("Restored mesh device role: Node");
                 break;
-            case BIT(BLE_MESH_PROVISIONER):
+            case BLE_MESH_SETTINGS_ROLE_PROV:
                 BT_INFO("Restored mesh device role: Provisioner");
                 break;
             default:
@@ -1284,14 +1312,14 @@ static int subnet_init(struct bt_mesh_subnet *sub)
 
     err = bt_mesh_net_keys_create(&sub->keys[0], sub->keys[0].net);
     if (err) {
-        BT_ERR("%s, Unable to generate keys for subnet", __func__);
+        BT_ERR("Unable to generate keys for subnet");
         return -EIO;
     }
 
     if (sub->kr_phase != BLE_MESH_KR_NORMAL) {
         err = bt_mesh_net_keys_create(&sub->keys[1], sub->keys[1].net);
         if (err) {
-            BT_ERR("%s, Unable to generate keys for subnet", __func__);
+            BT_ERR("Unable to generate keys for subnet");
             (void)memset(&sub->keys[0], 0, sizeof(sub->keys[0]));
             return -EIO;
         }
@@ -1330,15 +1358,15 @@ int settings_core_commit(void)
 
 #if defined(CONFIG_BLE_MESH_NODE)
     if (bt_mesh_is_node()) {
-        BT_INFO("sub[0].net_idx 0x%03x", bt_mesh.sub[0].net_idx);
-
         if (bt_mesh.sub[0].net_idx == BLE_MESH_KEY_UNUSED) {
             /* Nothing to do since we're not yet provisioned */
             return 0;
         }
 
+        BT_INFO("Settings commit, sub[0].net_idx 0x%03x", bt_mesh.sub[0].net_idx);
+
         if (IS_ENABLED(CONFIG_BLE_MESH_PB_GATT)) {
-            bt_mesh_proxy_prov_disable(true);
+            bt_mesh_proxy_server_prov_disable(true);
         }
 
         for (i = 0; i < ARRAY_SIZE(bt_mesh.sub); i++) {
@@ -1350,7 +1378,7 @@ int settings_core_commit(void)
 
             err = subnet_init(sub);
             if (err) {
-                BT_ERR("%s, Failed to init subnet 0x%03x", __func__, sub->net_idx);
+                BT_ERR("Failed to init subnet 0x%03x", sub->net_idx);
             }
         }
     }
@@ -1363,9 +1391,7 @@ int settings_core_commit(void)
             return 0;
         }
 
-        BT_INFO("p_sub[0]->net_idx 0x%03x", bt_mesh.p_sub[0]->net_idx);
-
-        bt_mesh_comp_provision(bt_mesh_provisioner_get_primary_elem_addr());
+        BT_INFO("Settings commit, p_sub[0]->net_idx 0x%03x", bt_mesh.p_sub[0]->net_idx);
 
         for (i = 0; i < ARRAY_SIZE(bt_mesh.p_sub); i++) {
             sub = bt_mesh.p_sub[i];
@@ -1376,18 +1402,19 @@ int settings_core_commit(void)
 
             err = subnet_init(sub);
             if (err) {
-                BT_ERR("%s, Failed to init subnet 0x%03x", __func__, sub->net_idx);
+                BT_ERR("Failed to init subnet 0x%03x", sub->net_idx);
             }
-            sub->node_id = BLE_MESH_NODE_IDENTITY_NOT_SUPPORTED;
         }
     }
 #endif /* CONFIG_BLE_MESH_PROVISIONER */
 
-    if (bt_mesh.ivu_duration < BLE_MESH_IVU_MIN_HOURS) {
-        k_delayed_work_submit(&bt_mesh.ivu_timer, BLE_MESH_IVU_TIMEOUT);
-    }
+    if (bt_mesh_is_node() || bt_mesh_is_provisioner()) {
+        if (bt_mesh.ivu_duration < BLE_MESH_IVU_MIN_HOURS) {
+            k_delayed_work_submit(&bt_mesh.ivu_timer, BLE_MESH_IVU_TIMEOUT);
+        }
 
-    bt_mesh_model_foreach(commit_model, NULL);
+        bt_mesh_model_foreach(commit_model, NULL);
+    }
 
 #if defined(CONFIG_BLE_MESH_NODE)
     if (bt_mesh_is_node()) {
@@ -1417,12 +1444,6 @@ int settings_core_commit(void)
     }
 #endif /* CONFIG_BLE_MESH_NODE */
 
-#if defined(CONFIG_BLE_MESH_PROVISIONER)
-    if (bt_mesh_is_provisioner()) {
-        bt_mesh_provisioner_net_start(BLE_MESH_PROV_ADV | BLE_MESH_PROV_GATT);
-    }
-#endif /* CONFIG_BLE_MESH_PROVISIONER */
-
     return 0;
 }
 
@@ -1443,6 +1464,14 @@ static void schedule_store(int flag)
 
     bt_mesh_atomic_set_bit(bt_mesh.flags, flag);
 
+    /* When Node is not provisioned OR Provisioner is disabled,
+     * we will directly erase the stored information.
+     */
+    if (!bt_mesh_is_provisioned() && !bt_mesh_is_provisioner_en()) {
+        store_pending(NULL);
+        return;
+    }
+
     if (bt_mesh_atomic_get(bt_mesh.flags) & NO_WAIT_PENDING_BITS) {
         timeout = K_NO_WAIT;
     } else if (bt_mesh_atomic_test_bit(bt_mesh.flags, BLE_MESH_RPL_PENDING) &&
@@ -1459,7 +1488,7 @@ static void schedule_store(int flag)
         return;
     }
 
-    BT_INFO("Waiting %d seconds", timeout / MSEC_PER_SEC);
+    BT_INFO("Settings store, waiting %d seconds", timeout / MSEC_PER_SEC);
 
     if (timeout) {
         k_delayed_work_submit(&pending_store, timeout);
@@ -1468,16 +1497,10 @@ static void schedule_store(int flag)
     }
 }
 
-static void clear_iv(void)
-{
-    BT_DBG("Clearing IV");
-    bt_mesh_save_core_settings("mesh/iv", NULL, 0);
-}
-
 static void clear_net(void)
 {
     BT_DBG("Clearing Network");
-    bt_mesh_save_core_settings("mesh/net", NULL, 0);
+    bt_mesh_erase_core_settings("mesh/net");
 }
 
 static void store_pending_net(void)
@@ -1495,7 +1518,7 @@ static void store_pending_net(void)
 
 void bt_mesh_store_role(void)
 {
-    BT_DBG("Store, device role %lu", bt_mesh_atomic_get(bt_mesh.flags) & DEVICE_ROLE_BITS);
+    BT_DBG("Store, device role %lu", bt_mesh_atomic_get(bt_mesh.flags) & BLE_MESH_SETTINGS_ROLE_BIT_MASK);
 
     bt_mesh_save_core_settings("mesh/role", (const u8_t *)bt_mesh.flags, sizeof(bt_mesh.flags));
 }
@@ -1526,9 +1549,10 @@ void bt_mesh_store_iv(bool only_duration)
     }
 }
 
-void bt_mesh_clear_iv(void)
+static void clear_iv(void)
 {
-    clear_iv();
+    BT_DBG("Clearing IV");
+    bt_mesh_erase_core_settings("mesh/iv");
 }
 
 static void store_pending_seq(void)
@@ -1552,7 +1576,8 @@ void bt_mesh_store_seq(void)
 
 void bt_mesh_clear_seq(void)
 {
-    bt_mesh_save_core_settings("mesh/seq", NULL, 0);
+    BT_DBG("Clearing Seq");
+    bt_mesh_erase_core_settings("mesh/seq");
 }
 
 static void store_rpl(struct bt_mesh_rpl *entry)
@@ -1591,11 +1616,9 @@ static void clear_rpl(void)
 
     BT_DBG("%s", __func__);
 
-    bt_mesh_rpl_clear();
-
     buf = bt_mesh_get_core_settings_item("mesh/rpl");
     if (!buf) {
-        bt_mesh_save_core_settings("mesh/rpl", NULL, 0);
+        bt_mesh_erase_core_settings("mesh/rpl");
         return;
     }
 
@@ -1603,11 +1626,17 @@ static void clear_rpl(void)
 
     for (i = 0; i < length / SETTINGS_ITEM_SIZE; i++) {
         src = net_buf_simple_pull_le16(buf);
+
+        if (!BLE_MESH_ADDR_IS_UNICAST(src)) {
+            BT_ERR("Invalid source address 0x%04x", src);
+            continue;
+        }
+
         sprintf(name, "mesh/rpl/%04x", src);
-        bt_mesh_save_core_settings(name, NULL, 0);
+        bt_mesh_erase_core_settings(name);
     }
 
-    bt_mesh_save_core_settings("mesh/rpl", NULL, 0);
+    bt_mesh_erase_core_settings("mesh/rpl");
 
     bt_mesh_free_buf(buf);
     return;
@@ -1635,7 +1664,7 @@ static void store_pending_hb_pub(void)
     struct hb_pub_val val = {0};
 
     if (!hb_pub) {
-        BT_WARN("NULL heartbeat publication");
+        BT_ERR("Invalid heartbeat publication");
         return;
     }
 
@@ -1647,6 +1676,12 @@ static void store_pending_hb_pub(void)
     val.net_idx = hb_pub->net_idx;
 
     bt_mesh_save_core_settings("mesh/hb_pub", (const u8_t *)&val, sizeof(val));
+}
+
+static void clear_hb_pub(void)
+{
+    BT_DBG("Clear heartbeat publication");
+    bt_mesh_erase_core_settings("mesh/hb_pub");
 }
 
 static void store_pending_cfg(void)
@@ -1673,7 +1708,7 @@ static void store_pending_cfg(void)
 static void clear_cfg(void)
 {
     BT_DBG("Clearing configuration");
-    bt_mesh_save_core_settings("mesh/cfg", NULL, 0);
+    bt_mesh_erase_core_settings("mesh/cfg");
 }
 
 static void clear_app_key(u16_t app_idx)
@@ -1684,11 +1719,11 @@ static void clear_app_key(u16_t app_idx)
     BT_DBG("AppKeyIndex 0x%03x", app_idx);
 
     sprintf(name, "mesh/ak/%04x", app_idx);
-    bt_mesh_save_core_settings(name, NULL, 0);
+    bt_mesh_erase_core_settings(name);
 
     err = bt_mesh_remove_core_settings_item("mesh/appkey", app_idx);
     if (err) {
-        BT_ERR("%s, Failed to remove 0x%03x from mesh/appkey", __func__, app_idx);
+        BT_ERR("Failed to remove 0x%03x from mesh/appkey", app_idx);
     }
 
     return;
@@ -1702,11 +1737,11 @@ static void clear_net_key(u16_t net_idx)
     BT_DBG("NetKeyIndex 0x%03x", net_idx);
 
     sprintf(name, "mesh/nk/%04x", net_idx);
-    bt_mesh_save_core_settings(name, NULL, 0);
+    bt_mesh_erase_core_settings(name);
 
     err = bt_mesh_remove_core_settings_item("mesh/netkey", net_idx);
     if (err) {
-        BT_ERR("%s, Failed to remove 0x%03x from mesh/netkey", __func__, net_idx);
+        BT_ERR("Failed to remove 0x%03x from mesh/netkey", net_idx);
     }
 
     return;
@@ -1729,7 +1764,7 @@ static void store_net_key(struct bt_mesh_subnet *sub)
     sprintf(name, "mesh/nk/%04x", sub->net_idx);
     err = bt_mesh_save_core_settings(name, (const u8_t *)&key, sizeof(key));
     if (err) {
-        BT_ERR("%s, Failed to store NetKey 0x%03x", __func__, sub->net_idx);
+        BT_ERR("Failed to store NetKey 0x%03x", sub->net_idx);
         return;
     }
 
@@ -1755,7 +1790,7 @@ static void store_app_key(struct bt_mesh_app_key *app)
     sprintf(name, "mesh/ak/%04x", app->app_idx);
     err = bt_mesh_save_core_settings(name, (const u8_t *)&key, sizeof(key));
     if (err) {
-        BT_ERR("%s, Failed to store AppKey 0x%03x", __func__, app->app_idx);
+        BT_ERR("Failed to store AppKey 0x%03x", app->app_idx);
         return;
     }
 
@@ -1815,14 +1850,7 @@ static void store_pending_mod_bind(struct bt_mesh_model *model, bool vnd)
     int err = 0;
 
     model_key = BLE_MESH_GET_MODEL_KEY(model->elem_idx, model->model_idx);
-
     sprintf(name, "mesh/%s/%04x/b", vnd ? "v" : "s", model_key);
-
-    if (IS_ENABLED(CONFIG_BLE_MESH_NODE) && bt_mesh_is_node() &&
-            !bt_mesh_is_provisioned()) {
-        bt_mesh_save_core_settings(name, NULL, 0);
-        return;
-    }
 
     err = bt_mesh_save_core_settings(name, (const u8_t *)model->keys, sizeof(model->keys));
     if (err) {
@@ -1846,14 +1874,7 @@ static void store_pending_mod_sub(struct bt_mesh_model *model, bool vnd)
     int err = 0;
 
     model_key = BLE_MESH_GET_MODEL_KEY(model->elem_idx, model->model_idx);
-
     sprintf(name, "mesh/%s/%04x/s", vnd ? "v" : "s", model_key);
-
-    if (IS_ENABLED(CONFIG_BLE_MESH_NODE) && bt_mesh_is_node() &&
-            !bt_mesh_is_provisioned()) {
-        bt_mesh_save_core_settings(name, NULL, 0);
-        return;
-    }
 
     err = bt_mesh_save_core_settings(name, (const u8_t *)model->groups, sizeof(model->groups));
     if (err) {
@@ -1882,6 +1903,9 @@ static void store_pending_mod_pub(struct bt_mesh_model *model, bool vnd)
         return;
     }
 
+    model_key = BLE_MESH_GET_MODEL_KEY(model->elem_idx, model->model_idx);
+    sprintf(name, "mesh/%s/%04x/p", vnd ? "v" : "s", model_key);
+
     pub.addr = model->pub->addr;
     pub.key = model->pub->key;
     pub.ttl = model->pub->ttl;
@@ -1889,16 +1913,6 @@ static void store_pending_mod_pub(struct bt_mesh_model *model, bool vnd)
     pub.period = model->pub->period;
     pub.period_div = model->pub->period_div;
     pub.cred = model->pub->cred;
-
-    model_key = BLE_MESH_GET_MODEL_KEY(model->elem_idx, model->model_idx);
-
-    sprintf(name, "mesh/%s/%04x/p", vnd ? "v" : "s", model_key);
-
-    if (IS_ENABLED(CONFIG_BLE_MESH_NODE) && bt_mesh_is_node() &&
-            !bt_mesh_is_provisioned()) {
-        bt_mesh_save_core_settings(name, NULL, 0);
-        return;
-    }
 
     err = bt_mesh_save_core_settings(name, (const u8_t *)&pub, sizeof(pub));
     if (err) {
@@ -1939,6 +1953,66 @@ static void store_pending_mod(struct bt_mesh_model *model,
     }
 }
 
+static void clear_mod_bind(struct bt_mesh_model *model, bool vnd)
+{
+    char name[16] = {'\0'};
+    u16_t model_key = 0U;
+
+    model_key = BLE_MESH_GET_MODEL_KEY(model->elem_idx, model->model_idx);
+    sprintf(name, "mesh/%s/%04x/b", vnd ? "v" : "s", model_key);
+
+    bt_mesh_erase_core_settings(name);
+    bt_mesh_remove_core_settings_item(vnd ? "mesh/vnd" : "mesh/sig", model_key);
+}
+
+static void clear_mod_sub(struct bt_mesh_model *model, bool vnd)
+{
+    char name[16] = {'\0'};
+    u16_t model_key = 0U;
+
+    model_key = BLE_MESH_GET_MODEL_KEY(model->elem_idx, model->model_idx);
+    sprintf(name, "mesh/%s/%04x/s", vnd ? "v" : "s", model_key);
+
+    bt_mesh_erase_core_settings(name);
+    bt_mesh_remove_core_settings_item(vnd ? "mesh/vnd" : "mesh/sig", model_key);
+}
+
+static void clear_mod_pub(struct bt_mesh_model *model, bool vnd)
+{
+    char name[16] = {'\0'};
+    u16_t model_key = 0U;
+
+    model_key = BLE_MESH_GET_MODEL_KEY(model->elem_idx, model->model_idx);
+    sprintf(name, "mesh/%s/%04x/p", vnd ? "v" : "s", model_key);
+
+    bt_mesh_erase_core_settings(name);
+    bt_mesh_remove_core_settings_item(vnd ? "mesh/vnd" : "mesh/sig", model_key);
+}
+
+static void clear_pending_mod(struct bt_mesh_model *model,
+                              struct bt_mesh_elem *elem, bool vnd,
+                              bool primary, void *user_data)
+{
+    if (!model->flags) {
+        return;
+    }
+
+    if (model->flags & BLE_MESH_MOD_BIND_PENDING) {
+        model->flags &= ~BLE_MESH_MOD_BIND_PENDING;
+        clear_mod_bind(model, vnd);
+    }
+
+    if (model->flags & BLE_MESH_MOD_SUB_PENDING) {
+        model->flags &= ~BLE_MESH_MOD_SUB_PENDING;
+        clear_mod_sub(model, vnd);
+    }
+
+    if (model->flags & BLE_MESH_MOD_PUB_PENDING) {
+        model->flags &= ~BLE_MESH_MOD_PUB_PENDING;
+        clear_mod_pub(model, vnd);
+    }
+}
+
 #define IS_VA_DEL(_label)   ((_label)->ref == 0)
 static void store_pending_va(void)
 {
@@ -1957,7 +2031,7 @@ static void store_pending_va(void)
         sprintf(name, "mesh/va/%04x", i);
 
         if (IS_VA_DEL(lab)) {
-            err = bt_mesh_save_core_settings(name, NULL, 0);
+            err = bt_mesh_erase_core_settings(name);
         } else {
             va.ref = lab->ref;
             va.addr = lab->addr;
@@ -1990,7 +2064,7 @@ static void store_pending(struct k_work *work)
     BT_DBG("%s", __func__);
 
     if (bt_mesh_atomic_test_and_clear_bit(bt_mesh.flags, BLE_MESH_RPL_PENDING)) {
-        if (!IS_ENABLED(CONFIG_BLE_MESH_NODE) || bt_mesh_is_provisioned()) {
+        if (bt_mesh_is_provisioned() || bt_mesh_is_provisioner_en()) {
             store_pending_rpl();
         } else {
             clear_rpl();
@@ -2012,7 +2086,7 @@ static void store_pending(struct k_work *work)
     }
 
     if (bt_mesh_atomic_test_and_clear_bit(bt_mesh.flags, BLE_MESH_IV_PENDING)) {
-        if (!IS_ENABLED(CONFIG_BLE_MESH_NODE) || bt_mesh_is_provisioned()) {
+        if (bt_mesh_is_provisioned() || bt_mesh_is_provisioner_en()) {
             store_pending_iv();
         } else {
             clear_iv();
@@ -2020,12 +2094,20 @@ static void store_pending(struct k_work *work)
     }
 
     if (bt_mesh_atomic_test_and_clear_bit(bt_mesh.flags, BLE_MESH_SEQ_PENDING)) {
-        store_pending_seq();
+        if (bt_mesh_is_provisioned() || bt_mesh_is_provisioner_en()) {
+            store_pending_seq();
+        } else {
+            bt_mesh_clear_seq();
+        }
     }
 
     if (IS_ENABLED(CONFIG_BLE_MESH_NODE) && bt_mesh_is_node() &&
         bt_mesh_atomic_test_and_clear_bit(bt_mesh.flags, BLE_MESH_HB_PUB_PENDING)) {
-        store_pending_hb_pub();
+        if (bt_mesh_is_provisioned()) {
+            store_pending_hb_pub();
+        } else {
+            clear_hb_pub();
+        }
     }
 
     if (IS_ENABLED(CONFIG_BLE_MESH_NODE) && bt_mesh_is_node() &&
@@ -2038,15 +2120,17 @@ static void store_pending(struct k_work *work)
     }
 
     if (bt_mesh_atomic_test_and_clear_bit(bt_mesh.flags, BLE_MESH_MOD_PENDING)) {
-        bt_mesh_model_foreach(store_pending_mod, NULL);
-        if (IS_ENABLED(CONFIG_BLE_MESH_NODE) && bt_mesh_is_node() &&
-                !bt_mesh_is_provisioned()) {
-            bt_mesh_save_core_settings("mesh/sig", NULL, 0);
-            bt_mesh_save_core_settings("mesh/vnd", NULL, 0);
+        if (bt_mesh_is_provisioned() || bt_mesh_is_provisioner_en()) {
+            bt_mesh_model_foreach(store_pending_mod, NULL);
+        } else {
+            bt_mesh_model_foreach(clear_pending_mod, NULL);
+            bt_mesh_erase_core_settings("mesh/sig");
+            bt_mesh_erase_core_settings("mesh/vnd");
         }
     }
 
-    if (bt_mesh_atomic_test_and_clear_bit(bt_mesh.flags, BLE_MESH_VA_PENDING)) {
+    if (IS_ENABLED(CONFIG_BLE_MESH_NODE) && bt_mesh_is_node() &&
+        bt_mesh_atomic_test_and_clear_bit(bt_mesh.flags, BLE_MESH_VA_PENDING)) {
         store_pending_va();
     }
 }
@@ -2152,7 +2236,7 @@ void bt_mesh_store_cfg(void)
 void bt_mesh_clear_role(void)
 {
     BT_DBG("Clear device role");
-    bt_mesh_save_core_settings("mesh/role", NULL, 0);
+    bt_mesh_erase_core_settings("mesh/role");
 }
 
 void bt_mesh_clear_net(void)
@@ -2272,35 +2356,8 @@ void bt_mesh_store_prov_info(u16_t primary_addr, u16_t alloc_addr)
 
 void bt_mesh_clear_prov_info(void)
 {
-    bt_mesh_save_core_settings("mesh/p_prov", NULL, 0);
-}
-
-static void clear_p_net_key(u16_t net_idx)
-{
-    char name[16] = {'\0'};
-    int err = 0;
-
-    sprintf(name, "mesh/pnk/%04x", net_idx);
-    bt_mesh_save_core_settings(name, NULL, 0);
-
-    err = bt_mesh_remove_core_settings_item("mesh/p_netkey", net_idx);
-    if (err) {
-        BT_ERR("Failed to remove 0x%03x from mesh/p_netkey", net_idx);
-    }
-}
-
-static void clear_p_app_key(u16_t app_idx)
-{
-    char name[16] = {'\0'};
-    int err = 0;
-
-    sprintf(name, "mesh/pak/%04x", app_idx);
-    bt_mesh_save_core_settings(name, NULL, 0);
-
-    err = bt_mesh_remove_core_settings_item("mesh/p_appkey", app_idx);
-    if (err) {
-        BT_ERR("Failed to remove 0x%03x from mesh/p_appkey", app_idx);
-    }
+    BT_DBG("Clearing prov info");
+    bt_mesh_erase_core_settings("mesh/p_prov");
 }
 
 static void store_p_net_key(struct bt_mesh_subnet *sub)
@@ -2317,7 +2374,7 @@ static void store_p_net_key(struct bt_mesh_subnet *sub)
     sprintf(name, "mesh/pnk/%04x", sub->net_idx);
     err = bt_mesh_save_core_settings(name, (const u8_t *)&key, sizeof(key));
     if (err) {
-        BT_ERR("%s, Failed to store NetKey 0x%03x", __func__, sub->net_idx);
+        BT_ERR("Failed to store NetKey 0x%03x", sub->net_idx);
         return;
     }
 
@@ -2341,7 +2398,7 @@ static void store_p_app_key(struct bt_mesh_app_key *app)
     sprintf(name, "mesh/pak/%04x", app->app_idx);
     err = bt_mesh_save_core_settings(name, (const u8_t *)&key, sizeof(key));
     if (err) {
-        BT_ERR("%s, Failed to store AppKey 0x%03x", __func__, app->app_idx);
+        BT_ERR("Failed to store AppKey 0x%03x", app->app_idx);
         return;
     }
 
@@ -2353,7 +2410,7 @@ static void store_p_app_key(struct bt_mesh_app_key *app)
 
 void bt_mesh_store_p_net_idx(void)
 {
-    BT_DBG("p_net_idx_next 0x%03x", bt_mesh.p_net_idx_next);
+    BT_DBG("Store, p_net_idx_next 0x%03x", bt_mesh.p_net_idx_next);
 
     bt_mesh_save_core_settings("mesh/p_netidx",
         (const u8_t *)&bt_mesh.p_net_idx_next, sizeof(bt_mesh.p_net_idx_next));
@@ -2361,12 +2418,13 @@ void bt_mesh_store_p_net_idx(void)
 
 void bt_mesh_clear_p_net_idx(void)
 {
-    bt_mesh_save_core_settings("mesh/p_netidx", NULL, 0);
+    BT_DBG("Clearing NetKey Index");
+    bt_mesh_erase_core_settings("mesh/p_netidx");
 }
 
 void bt_mesh_store_p_app_idx(void)
 {
-    BT_DBG("p_app_idx_next 0x%03x", bt_mesh.p_app_idx_next);
+    BT_DBG("Store, p_app_idx_next 0x%03x", bt_mesh.p_app_idx_next);
 
     bt_mesh_save_core_settings("mesh/p_appidx",
         (const u8_t *)&bt_mesh.p_app_idx_next, sizeof(bt_mesh.p_app_idx_next));
@@ -2374,13 +2432,14 @@ void bt_mesh_store_p_app_idx(void)
 
 void bt_mesh_clear_p_app_idx(void)
 {
-    bt_mesh_save_core_settings("mesh/p_appidx", NULL, 0);
+    BT_DBG("Clearing AppKey Index");
+    bt_mesh_erase_core_settings("mesh/p_appidx");
 }
 
 void bt_mesh_store_p_subnet(struct bt_mesh_subnet *sub)
 {
     if (sub == NULL) {
-        BT_ERR("%s, Invalid subnet",__func__);
+        BT_ERR("Invalid subnet");
         return;
     }
 
@@ -2393,7 +2452,7 @@ void bt_mesh_store_p_subnet(struct bt_mesh_subnet *sub)
 void bt_mesh_store_p_app_key(struct bt_mesh_app_key *key)
 {
     if (key == NULL) {
-        BT_ERR("%s, Invalid AppKey",__func__);
+        BT_ERR("Invalid AppKey");
         return;
     }
 
@@ -2403,28 +2462,36 @@ void bt_mesh_store_p_app_key(struct bt_mesh_app_key *key)
     store_p_app_key(key);
 }
 
-void bt_mesh_clear_p_subnet(struct bt_mesh_subnet *sub)
+void bt_mesh_clear_p_subnet(u16_t net_idx)
 {
-    if (sub == NULL) {
-        BT_ERR("%s, Invalid subnet",__func__);
-        return;
+    char name[16] = {'\0'};
+    int err = 0;
+
+    BT_DBG("NetKeyIndex 0x%03x", net_idx);
+
+    sprintf(name, "mesh/pnk/%04x", net_idx);
+    bt_mesh_erase_core_settings(name);
+
+    err = bt_mesh_remove_core_settings_item("mesh/p_netkey", net_idx);
+    if (err) {
+        BT_ERR("Failed to remove 0x%04x from mesh/p_netkey", net_idx);
     }
-
-    BT_DBG("NetKeyIndex 0x%03x", sub->net_idx);
-
-    clear_p_net_key(sub->net_idx);
 }
 
-void bt_mesh_clear_p_app_key(struct bt_mesh_app_key *key)
+void bt_mesh_clear_p_app_key(u16_t app_idx)
 {
-    if (key == NULL) {
-        BT_ERR("%s, Invalid AppKey",__func__);
-        return;
+    char name[16] = {'\0'};
+    int err = 0;
+
+    BT_DBG("AppKeyIndex 0x%03x", app_idx);
+
+    sprintf(name, "mesh/pak/%04x", app_idx);
+    bt_mesh_erase_core_settings(name);
+
+    err = bt_mesh_remove_core_settings_item("mesh/p_appkey", app_idx);
+    if (err) {
+        BT_ERR("Failed to remove 0x%04x from mesh/p_appkey", app_idx);
     }
-
-    BT_DBG("AppKeyIndex 0x%03x", key->app_idx);
-
-    clear_p_app_key(key->app_idx);
 }
 
 void bt_mesh_clear_rpl_single(u16_t src)
@@ -2433,12 +2500,12 @@ void bt_mesh_clear_rpl_single(u16_t src)
     int err = 0;
 
     if (!BLE_MESH_ADDR_IS_UNICAST(src)) {
-        BT_ERR("%s, Invalid source address 0x%04x", __func__, src);
+        BT_ERR("Invalid src 0x%04x", src);
         return;
     }
 
     sprintf(name, "mesh/rpl/%04x", src);
-    bt_mesh_save_core_settings(name, NULL, 0);
+    bt_mesh_erase_core_settings(name);
 
     err = bt_mesh_remove_core_settings_item("mesh/rpl", src);
     if (err) {
@@ -2453,7 +2520,7 @@ void bt_mesh_store_node_info(struct bt_mesh_node *node)
     int err = 0;
 
     if (node == NULL) {
-        BT_ERR("%s, Invalid node", __func__);
+        BT_ERR("Invalid node info");
         return;
     }
 
@@ -2488,15 +2555,15 @@ static void clear_node(u16_t addr)
 
     /* Clear node information */
     sprintf(name, "mesh/pn/%04x/i", addr);
-    bt_mesh_save_core_settings(name, NULL, 0);
+    bt_mesh_erase_core_settings(name);
 
     /* Clear node name */
     sprintf(name, "mesh/pn/%04x/n", addr);
-    bt_mesh_save_core_settings(name, NULL, 0);
+    bt_mesh_erase_core_settings(name);
 
     /* Clear node composition data */
     sprintf(name, "mesh/pn/%04x/c", addr);
-    bt_mesh_save_core_settings(name, NULL, 0);
+    bt_mesh_erase_core_settings(name);
 
     err = bt_mesh_remove_core_settings_item("mesh/p_node", addr);
     if (err) {
@@ -2507,7 +2574,7 @@ static void clear_node(u16_t addr)
 void bt_mesh_clear_node_info(u16_t unicast_addr)
 {
     if (!BLE_MESH_ADDR_IS_UNICAST(unicast_addr)) {
-        BT_ERR("%s, Invalid unicast address 0x%04x", __func__, unicast_addr);
+        BT_ERR("Invalid unicast address 0x%04x", unicast_addr);
         return;
     }
 
@@ -2523,7 +2590,7 @@ void bt_mesh_store_node_name(struct bt_mesh_node *node)
     int err = 0;
 
     if (node == NULL) {
-        BT_ERR("%s, Invalid node", __func__);
+        BT_ERR("Invalid node info");
         return;
     }
 
@@ -2542,7 +2609,7 @@ void bt_mesh_store_node_comp_data(struct bt_mesh_node *node)
     int err = 0;
 
     if (!node || !node->comp_data || node->comp_length == 0U) {
-        BT_ERR("%s, Invalid node info", __func__);
+        BT_ERR("Invalid node info");
         return;
     }
 
@@ -2556,33 +2623,40 @@ void bt_mesh_store_node_comp_data(struct bt_mesh_node *node)
 
 int settings_core_init(void)
 {
-    BT_DBG("%s", __func__);
-
     k_delayed_work_init(&pending_store, store_pending);
-
-    return 0;
-}
-
-int bt_mesh_settings_init(void)
-{
-    BT_DBG("%s", __func__);
-
-    bt_mesh_settings_foreach();
-
     return 0;
 }
 
 int settings_core_deinit(void)
 {
     k_delayed_work_free(&pending_store);
-
     return 0;
 }
 
-int bt_mesh_settings_deinit(void)
+int settings_core_erase(void)
 {
-    bt_mesh_settings_deforeach();
+    /* Erase here must not use the pending_store timer.
+     * This is used for erasing the information which
+     * could not be erased during the previous deinit
+     * operations.
+     */
+    bt_mesh_clear_net();
+    bt_mesh_clear_seq();
+    bt_mesh_clear_role();
+    return 0;
+}
 
+int bt_mesh_settings_init(void)
+{
+    bt_mesh_settings_mutex_new();
+    bt_mesh_settings_init_foreach();
+    return 0;
+}
+
+int bt_mesh_settings_deinit(bool erase)
+{
+    bt_mesh_settings_deinit_foreach(erase);
+    bt_mesh_settings_mutex_free();
     return 0;
 }
 
