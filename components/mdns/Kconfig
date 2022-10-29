@@ -10,4 +10,10 @@ menu "mDNS"
             the maximum amount of services here. The valid value is from 1
             to 64.
 
+    config MDNS_TASK_STACK_SIZE
+        int "mDNS task stack size"
+        default 4096
+        help
+            Allows setting mDNS task stacksize.
+
 endmenu
